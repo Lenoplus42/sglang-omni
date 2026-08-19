@@ -5,13 +5,14 @@ from __future__ import annotations
 
 
 def _with_index(dev_type: str, raw_index: str, index: int | None) -> str:
-    if index is not None:
-        idx: int | None = int(index)
-    else:
-        idx = int(raw_index) if raw_index else None
-    if dev_type == "cpu" or idx is None:
+    if raw_index:
+        raise ValueError(
+            f"device={f'{dev_type}:{raw_index}'!r} names an index; device can"
+            " only name the type"
+        )
+    if dev_type == "cpu" or index is None:
         return dev_type
-    return f"{dev_type}:{idx}"
+    return f"{dev_type}:{int(index)}"
 
 
 def resolve_device_spec(device: str | None, index: int | None = None) -> str:
