@@ -28,7 +28,7 @@ def test_fun_asr_config_uses_batched_stage_with_32_running_requests() -> None:
     assert config.terminal_stages == ["asr"]
     assert config.gpu_placement == {"asr": 0}
     assert config.stages[0].factory.endswith("create_sglang_fun_asr_executor")
-    assert config.stages[0].factory_args["device"] == "cuda:0"
+    assert config.stages[0].factory_args["device"] is None
     assert config.stages[0].factory_args["max_running_requests"] == 32
     assert config.stages[0].factory_args["max_new_tokens"] == 200
     assert config.stages[0].factory_args["enable_pre_lm_encoder"] is True

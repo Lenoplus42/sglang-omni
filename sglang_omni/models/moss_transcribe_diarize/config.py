@@ -40,7 +40,7 @@ class MossTranscribeDiarizePipelineConfig(PipelineConfig):
             process="asr",
             factory=f"{_PKG}.stages.create_sglang_moss_transcribe_diarize_executor",
             factory_args={
-                "device": "cuda:0",
+                "device": None,
                 "max_running_requests": 16,
                 "encoder_cache_size_bytes": 4 * 1024**3,
                 "encoder_max_batch_size": _ENCODER_MAX_BATCH_SIZE,

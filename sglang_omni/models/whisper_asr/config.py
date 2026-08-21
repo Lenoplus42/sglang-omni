@@ -43,7 +43,7 @@ class WhisperASRPipelineConfig(PipelineConfig):
             process="asr",
             factory=f"{_PKG}.stages.create_sglang_whisper_asr_executor",
             factory_args={
-                "device": "cuda:0",
+                "device": None,
                 "max_running_requests": 64,
                 "enable_encoder_cuda_graph": True,
                 "request_build_max_workers": 8,

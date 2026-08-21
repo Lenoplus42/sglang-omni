@@ -212,7 +212,7 @@ def test_whisper_asr_config_uses_single_batched_stage() -> None:
     assert config.terminal_stages == ["asr"]
     assert config.gpu_placement == {"asr": 0}
     assert config.stages[0].factory.endswith("create_sglang_whisper_asr_executor")
-    assert config.stages[0].factory_args["device"] == "cuda:0"
+    assert config.stages[0].factory_args["device"] is None
     assert config.stages[0].factory_args["max_running_requests"] == 64
     assert config.stages[0].factory_args["enable_encoder_cuda_graph"] is True
     assert config.stages[0].factory_args["request_build_max_workers"] == 8

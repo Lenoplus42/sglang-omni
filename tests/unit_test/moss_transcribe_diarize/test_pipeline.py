@@ -65,7 +65,7 @@ def test_moss_transcribe_diarize_config_uses_single_batched_stage() -> None:
     assert config.stages[0].factory.endswith(
         "create_sglang_moss_transcribe_diarize_executor"
     )
-    assert config.stages[0].factory_args["device"] == "cuda:0"
+    assert config.stages[0].factory_args["device"] is None
     assert config.stages[0].factory_args["max_running_requests"] == 16
     assert config.stages[0].factory_args["enable_torch_compile"] is True
     assert config.stages[0].factory_args["torch_compile_max_bs"] == 4

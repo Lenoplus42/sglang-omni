@@ -33,7 +33,7 @@ class FunASRPipelineConfig(PipelineConfig):
             process="asr",
             factory=f"{_PKG}.stages.create_sglang_fun_asr_executor",
             factory_args={
-                "device": "cuda:0",
+                "device": None,
                 "max_running_requests": 32,
                 "max_new_tokens": 200,
                 "enable_encoder_torch_compile": False,

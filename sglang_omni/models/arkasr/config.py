@@ -23,7 +23,7 @@ class ArkasrPipelineConfig(PipelineConfig):
             process="asr",
             factory=f"{_PKG}.stages.create_sglang_arkasr_executor",
             factory_args={
-                "device": "cuda:0",
+                "device": None,
                 "max_running_requests": 32,
                 "encoder_max_batch_size": 8,
                 "max_new_tokens": 256,
