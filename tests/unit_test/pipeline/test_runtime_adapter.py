@@ -19,6 +19,9 @@ _FACTORY = "tests.unit_test.fixtures.pipeline_fakes.runtime_factory"
 _FACTORY_WITHOUT_TOTAL_BUDGET = (
     "tests.unit_test.fixtures.pipeline_fakes.runtime_factory_without_total_budget"
 )
+_FACTORY_WITHOUT_GPU_ID = (
+    "tests.unit_test.fixtures.pipeline_fakes.runtime_factory_without_gpu_id"
+)
 
 
 def _stage(**kwargs) -> StageConfig:
@@ -214,6 +217,23 @@ def test_mapped_runtime_field_requires_stage_arg_mapping() -> None:
 
     with pytest.raises(ValueError, match="runtime_arg_map"):
         resolve_stage_factory_args(stage, config)
+
+
+def test_gpu_placed_stage_rejects_a_factory_with_no_gpu_id_parameter() -> None:
+    stage = _stage(factory=_FACTORY_WITHOUT_GPU_ID)
+    config = PipelineConfig(model_path="dummy-model", stages=[stage])
+
+    with pytest.raises(ValueError, match="no gpu_id parameter"):
+        resolve_stage_factory_args(stage, config)
+
+
+def test_a_non_gpu_stage_may_use_a_factory_with_no_gpu_id_parameter() -> None:
+    stage = _stage(factory=_FACTORY_WITHOUT_GPU_ID, gpu=None)
+    config = PipelineConfig(model_path="dummy-model", stages=[stage])
+
+    args = resolve_stage_factory_args(stage, config)
+
+    assert "gpu_id" not in args
 
 
 def test_rank_gpu_id_can_be_supplied_by_launch_planner() -> None:

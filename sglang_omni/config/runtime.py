@@ -114,6 +114,13 @@ def resolve_factory_signature_args(
             f"{factory_name!r} does not declare a gpu_id parameter"
         )
 
+    if defaults.get("gpu_id") is not None and "gpu_id" not in sig.parameters:
+        raise ValueError(
+            f"{factory.__module__}.{factory.__qualname__} is placed on a GPU "
+            "but its signature has no gpu_id parameter, so placement can "
+            "never reach it"
+        )
+
     for name, value in defaults.items():
         if name in sig.parameters and name not in args:
             args[name] = value

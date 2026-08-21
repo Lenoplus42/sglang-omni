@@ -268,6 +268,17 @@ def runtime_factory_with_device(
     return {"model_path": model_path, "device": device}
 
 
+def runtime_factory_without_gpu_id(
+    *,
+    model_path: str,
+    server_args_overrides: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "model_path": model_path,
+        "server_args_overrides": server_args_overrides,
+    }
+
+
 def make_scheduler_accepting_model_path(
     model_path: str, **kwargs: Any
 ) -> FakeScheduler:
