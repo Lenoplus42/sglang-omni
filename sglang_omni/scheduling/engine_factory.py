@@ -54,6 +54,7 @@ class SGLangGenerationEngineBuilder(ABC):
     ) -> Any:
         import torch
 
+        from sglang_omni.platforms import current_platform
         from sglang_omni.scheduling import bootstrap as scheduling_bootstrap
         from sglang_omni.scheduling import sglang_backend
         from sglang_omni.utils.device import place_device_spec, resolve_device_spec
@@ -64,7 +65,17 @@ class SGLangGenerationEngineBuilder(ABC):
             if device is None
             else place_device_spec(device, gpu_id)
         )
-        gpu_id = torch.device(device).index or 0
+        concrete_device = torch.device(device)
+        # note (lennox): an unplaced GPU stage (no stage.gpu, no explicit
+        # gpu_id) must bind to whatever card this process is already on, not
+        # card 0 -- a TP follower or a standalone build() call can already be
+        # pinned to a different card by the time this runs.
+        if concrete_device.type != "cpu" and concrete_device.index is None:
+            concrete_device = current_platform.get_device(
+                torch.get_device_module().current_device()
+            )
+        device = str(concrete_device)
+        gpu_id = concrete_device.index or 0
         self.checkpoint_dir = checkpoint_dir
         self.device = device
         self.gpu_id = gpu_id

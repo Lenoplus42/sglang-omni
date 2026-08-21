@@ -35,6 +35,60 @@ def test_asr_engine_builder_preserves_model_path() -> None:
     assert AsrEngineBuilder.resolve_checkpoint(object(), "repo/id") == "repo/id"
 
 
+def test_build_falls_back_to_the_process_current_device_not_zero(monkeypatch) -> None:
+    import torch
+
+    from sglang_omni.scheduling.engine_factory import AsrEngineBuilder
+
+    monkeypatch.setattr(
+        platforms.current_platform, "device_type", "cuda", raising=False
+    )
+    monkeypatch.setattr(
+        platforms.current_platform,
+        "get_device",
+        lambda index: torch.device("cuda", index),
+        raising=False,
+    )
+    real_device_module = torch.get_device_module()
+
+    class _FakeDeviceModule:
+        def current_device(self) -> int:
+            return 3
+
+        def __getattr__(self, name: str):
+            return getattr(real_device_module, name)
+
+    monkeypatch.setattr(torch, "get_device_module", lambda *a, **k: _FakeDeviceModule())
+
+    final: dict[str, object] = {}
+
+    class _Stop(Exception):
+        pass
+
+    class RecordingBuilder(AsrEngineBuilder):
+        model_name = "Test ASR"
+        context_length = 256
+
+        def pre_infra_setup(self, checkpoint_dir: str) -> None:
+            del checkpoint_dir
+            final["device"] = self.device
+            final["gpu_id"] = self.gpu_id
+            raise _Stop
+
+        def generation_defaults(self, *, dtype: str) -> dict[str, Any]:
+            del dtype
+            return {}
+
+        def make_adapters(self, model: Any) -> tuple[Any, Any]:
+            del model
+            return object(), object()
+
+    with pytest.raises(_Stop):
+        RecordingBuilder().build("repo/id")
+
+    assert final == {"device": "cuda:3", "gpu_id": 3}
+
+
 def test_legacy_tts_engine_factory_paths_remain_importable() -> None:
     module_names = (
         "sglang_omni.models.moss_tts.stages",
@@ -304,7 +358,7 @@ def test_tts_engine_builder_phase_order_and_override_contract(monkeypatch) -> No
 
     scheduler = RecordingBuilder().build(
         "model",
-        device="cuda:0",
+        device="cuda",
         gpu_id=2,
         server_args_overrides={
             "cuda_graph_max_bs": 8,
