@@ -168,7 +168,7 @@ def _enable_inductor_gemm_autotune() -> None:
 def create_generation_executor(
     model_path: str,
     *,
-    device: str = "cuda:0",
+    device: str | None = None,
     gpu_id: int | None = None,
     max_new_tokens: int = 4096,
     server_args_overrides: dict[str, Any] | None = None,
