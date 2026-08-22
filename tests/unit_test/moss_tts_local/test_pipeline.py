@@ -436,7 +436,6 @@ def test_pipeline_stage_wiring():
         assert "moss_tts_local" in stage.factory
     assert stages["preprocessing"].process == "pipeline"
     assert stages["preprocessing"].gpu == 0
-    assert stages["preprocessing"].factory_args["device"] == "cuda:0"
     assert stages["preprocessing"].factory_args["max_concurrency"] == 16
     assert stages["preprocessing"].factory_args["ref_audio_cache"] is True
     assert stages["preprocessing"].factory_args["ref_audio_cache_max_items"] == 8192
@@ -452,7 +451,6 @@ def test_pipeline_stage_wiring():
     assert stages["tts_engine"].factory_args["codec_mem_reserve"] == pytest.approx(0.0)
     assert stages["vocoder"].process == "vocoder"
     assert stages["vocoder"].gpu == 0
-    assert stages["vocoder"].factory_args["device"] == "cuda:0"
     assert stages[
         "vocoder"
     ].runtime.resources.total_gpu_memory_fraction == pytest.approx(0.18)
@@ -473,16 +471,18 @@ def test_pipeline_stage_wiring():
         model_path="OpenMOSS-Team/moss-local-test"
     )
     colocated_stages = {stage.name: stage for stage in colocated.stages}
-    assert colocated_stages["preprocessing"].factory_args["device"] == "cuda:0"
+    assert colocated_stages["preprocessing"].gpu == 0
     assert (
         colocated_stages["preprocessing"].factory_args["ref_audio_cache_max_items"]
         == 8192
     )
-    assert colocated_stages["vocoder"].factory_args["device"] == "cuda:0"
+    assert colocated_stages["vocoder"].gpu == 0
 
     split = MossTTSLocalSplitPipelineConfig(model_path="OpenMOSS-Team/moss-local-test")
     split_stages = {stage.name: stage for stage in split.stages}
-    assert split_stages["preprocessing"].factory_args["device"] == "cuda:1"
+    # preprocessing can't follow the codec to a second GPU: it hands prepared
+    # requests to tts_engine through a same-process in-memory queue.
+    assert split_stages["preprocessing"].gpu == 0
     assert split_stages["tts_engine"].gpu == 0
     split_runtime = split_stages["tts_engine"].runtime
     assert split_runtime.resources.total_gpu_memory_fraction is None
@@ -492,13 +492,15 @@ def test_pipeline_stage_wiring():
         is None
     )
     assert split_stages["vocoder"].runtime.resources.total_gpu_memory_fraction is None
-    assert split_stages["vocoder"].factory_args["device"] == "cuda:1"
-    # The split variant carries no per-stage GPU budgets, so its vocoder stays in
-    # the shared pipeline process; its declared topology must still validate.
-    assert split_stages["vocoder"].process == "pipeline"
+    assert split_stages["vocoder"].gpu == 1
+    # vocoder is a real second GPU here, so it needs its own OS process --
+    # sharing "pipeline" with tts_engine (GPU 0) would ask one process to be
+    # on two GPUs at once.
+    assert split_stages["vocoder"].process == "vocoder"
     split_topology = build_compiled_process_topology(split)
     assert [(group.name, group.stage_names) for group in split_topology.groups] == [
-        ("pipeline", ("preprocessing", "tts_engine", "vocoder"))
+        ("pipeline", ("preprocessing", "tts_engine")),
+        ("vocoder", ("vocoder",)),
     ]
 
 
