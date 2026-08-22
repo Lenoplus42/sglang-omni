@@ -226,7 +226,7 @@ def _device(gpu_id: int | None) -> str:
 def create_sglang_omni_tts_engine_executor(
     model_path: str,
     *,
-    gpu_id: int | None = 0,
+    gpu_id: int | None = None,
     dtype: str = "bfloat16",
     mem_fraction_static: float = 0.5,
     fp8: bool = False,
@@ -255,8 +255,8 @@ def create_sglang_omni_tts_engine_executor(
     ).build(
         model_path,
         # CUDA-only model: keep the pre-existing device rather than resolving through
-        # the ambient platform.
-        device="cuda:0",
+        # the ambient platform. The index still comes from gpu_id, not this string.
+        device="cuda",
         gpu_id=gpu_id,
         dtype=dtype,
         server_args_overrides=server_args_overrides,
