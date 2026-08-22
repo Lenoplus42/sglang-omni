@@ -74,7 +74,7 @@ def create_ar_executor(
 def create_dit_dav_executor(
     model_path: str,
     *,
-    gpu_id: int | None = 1,
+    gpu_id: int | None = None,
     device: str | None = None,
     dtype: str = "float32",
     dit_steps: int = DEFAULT_DIT_STEPS,
@@ -91,10 +91,11 @@ def create_dit_dav_executor(
     cache_dit_max_continuous_cached_steps: int = 1,
     **_: Any,
 ) -> MiniMaxMusic3AcousticScheduler:
-    if device is None:
-        if gpu_id is None or not torch.cuda.is_available():
-            raise RuntimeError("MiniMax Music 3 acoustic inference requires CUDA")
-        device = f"cuda:{gpu_id}"
+    from sglang_omni.utils.device import resolve_device_spec
+
+    if not torch.cuda.is_available():
+        raise RuntimeError("MiniMax Music 3 acoustic inference requires CUDA")
+    device = resolve_device_spec(device, gpu_id)
     decoder = MiniMaxMusic3AcousticDecoder(
         model_path,
         device=device,

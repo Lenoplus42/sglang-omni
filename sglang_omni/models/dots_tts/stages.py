@@ -27,12 +27,6 @@ from sglang_omni.utils.checkpoint import resolve_checkpoint
 _DEFAULT_CONTEXT_LENGTH = 2048
 
 
-def _device(device: str | None, gpu_id: int | None) -> str:
-    if device is not None and device != "cuda":
-        return device
-    return f"cuda:{int(gpu_id or 0)}"
-
-
 def _configure_optimized_kernels() -> None:
     """Configure the process-global dots DiT compile hook.
 
@@ -366,13 +360,17 @@ def create_preprocessing_executor(
 def create_reference_encode_executor(
     model_path: str,
     *,
-    device: str | None = "cuda",
+    device: str | None = None,
     gpu_id: int | None = None,
     max_concurrency: int = 8,
     max_batch_size: int = 1,
     max_batch_wait_ms: float = 4.0,
 ) -> SimpleScheduler:
-    worker_device = _device(device, gpu_id)
+    from sglang_omni.utils.device import resolve_device_spec
+
+    if not torch.cuda.is_available():
+        raise RuntimeError("dots.tts requires CUDA")
+    worker_device = resolve_device_spec(device, gpu_id)
     codec = load_dots_audio_codec(model_path, device=worker_device)
     encoder = DotsReferenceEncoder(
         codec,
@@ -394,19 +392,21 @@ def create_sglang_latent_engine_executor(
     optimize: bool = True,
     max_generate_length: int = 500,
     num_steps: int = 4,
-    device: str | None = "cuda",
+    device: str | None = None,
     gpu_id: int | None = None,
     server_args_overrides: dict[str, Any] | None = None,
 ) -> OmniScheduler:
     from sglang_omni.models.dots_tts.engine_builder import DotsTTSEngineBuilder
 
+    if not torch.cuda.is_available():
+        raise RuntimeError("dots.tts requires CUDA")
     return DotsTTSEngineBuilder(
         optimize=optimize,
         num_steps=num_steps,
         max_audio_patches=max_generate_length,
     ).build(
         model_path,
-        device=device or "cuda",
+        device=device,
         gpu_id=gpu_id,
         dtype=precision,
         server_args_overrides=server_args_overrides,
@@ -416,7 +416,7 @@ def create_sglang_latent_engine_executor(
 def create_vocoder_executor(
     model_path: str,
     *,
-    device: str | None = "cuda",
+    device: str | None = None,
     gpu_id: int | None = None,
     optimize: bool = True,
     vocoder_merge_steps: int = 4,
@@ -425,7 +425,13 @@ def create_vocoder_executor(
     stream_slots: int = 16,
     **_: Any,
 ) -> DotsTTSStreamingVocoder:
-    codec = load_dots_audio_codec(model_path, device=_device(device, gpu_id))
+    from sglang_omni.utils.device import resolve_device_spec
+
+    if not torch.cuda.is_available():
+        raise RuntimeError("dots.tts requires CUDA")
+    codec = load_dots_audio_codec(
+        model_path, device=resolve_device_spec(device, gpu_id)
+    )
     vocoder = DotsTTSStreamingVocoder(
         codec,
         optimize=optimize,
