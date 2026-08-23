@@ -45,4 +45,27 @@ def place_device_spec(device: str, index: int | None = None) -> str:
     return _with_index(dev_type.lower(), raw_index, index)
 
 
-__all__ = ["place_device_spec", "resolve_device_spec"]
+def resolve_concrete_device(device: str | None, index: int | None = None) -> "torch.device":
+    """Resolve device/index to a concrete torch.device, an index included.
+
+    resolve_device_spec/place_device_spec can return a bare type (e.g. "cuda")
+    when neither the caller nor placement supplied an index. A caller that
+    needs a concrete gpu_id asks the host which card this process is already
+    on, rather than assuming 0.
+    """
+    import torch
+
+    from sglang_omni.platforms import current_platform
+
+    spec = (
+        resolve_device_spec(device, index)
+        if device is None
+        else place_device_spec(device, index)
+    )
+    concrete = torch.device(spec)
+    if concrete.type != "cpu" and concrete.index is None:
+        concrete = current_platform.get_device(torch.get_device_module().current_device())
+    return concrete
+
+
+__all__ = ["place_device_spec", "resolve_concrete_device", "resolve_device_spec"]

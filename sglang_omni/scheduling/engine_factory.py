@@ -54,24 +54,12 @@ class SGLangGenerationEngineBuilder(ABC):
     ) -> Any:
         import torch
 
-        from sglang_omni.platforms import current_platform
         from sglang_omni.scheduling import bootstrap as scheduling_bootstrap
         from sglang_omni.scheduling import sglang_backend
-        from sglang_omni.utils.device import place_device_spec, resolve_device_spec
+        from sglang_omni.utils.device import resolve_concrete_device
 
         checkpoint_dir = self.resolve_checkpoint(model_path)
-        device = (
-            resolve_device_spec(None, gpu_id)
-            if device is None
-            else place_device_spec(device, gpu_id)
-        )
-        concrete_device = torch.device(device)
-        # note (lennox): binds to this process's actual card, not 0 -- a TP
-        # follower can already be pinned to a different one.
-        if concrete_device.type != "cpu" and concrete_device.index is None:
-            concrete_device = current_platform.get_device(
-                torch.get_device_module().current_device()
-            )
+        concrete_device = resolve_concrete_device(device, gpu_id)
         device = str(concrete_device)
         gpu_id = concrete_device.index or 0
         self.checkpoint_dir = checkpoint_dir
