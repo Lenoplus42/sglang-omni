@@ -54,7 +54,6 @@ class HiggsTtsPipelineConfig(PipelineConfig):
             name="audio_encoder",
             process="tts_frontend",
             factory=f"{_PKG}.stages.create_audio_encoder_executor",
-            factory_args={"device": "cuda"},
             gpu=0,
             runtime=StageRuntimeConfig(
                 resources=StageResourceConfig(total_gpu_memory_fraction=0.03)
@@ -66,7 +65,6 @@ class HiggsTtsPipelineConfig(PipelineConfig):
             process="pipeline",
             factory=f"{_PKG}.stages.create_sglang_tts_engine_executor",
             factory_args={
-                "device": "cuda",
                 "max_new_tokens": 2048,
                 "enable_async_decode": True,
             },
@@ -85,7 +83,6 @@ class HiggsTtsPipelineConfig(PipelineConfig):
             process="pipeline",
             factory=f"{_PKG}.stages.create_vocoder_executor",
             factory_args={
-                "device": "cuda",
                 "compile_decode": False,
                 # Before the steady cursor is established, a decode window is
                 # bounded by the default 75-row stride plus its 75-row
