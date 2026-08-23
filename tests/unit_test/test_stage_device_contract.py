@@ -34,6 +34,20 @@ def _iter_stages():
                 yield model, label, stage
 
 
+# note (lennox): only device/gpu_id's own defaults are ever asserted on below,
+# and R3 always writes those as a bare `None` literal -- but ast.literal_eval
+# still runs over every OTHER parameter's default first, and a real default
+# like `_SOME_CONSTANT` (a Name) or `64 * 1024 * 1024` (a BinOp) isn't a
+# literal, so it would raise before device/gpu_id are ever reached. Ellipsis
+# stands in for "not a literal", same sentinel already used for
+# no-default-at-all.
+def _literal_default(node: ast.expr) -> object:
+    try:
+        return ast.literal_eval(node)
+    except ValueError:
+        return ...
+
+
 def _factory_parameters(dotted: str) -> dict[str, object]:
     try:
         return {
@@ -43,29 +57,61 @@ def _factory_parameters(dotted: str) -> dict[str, object]:
     except ImportError:
         pass
     module_name, _, func_name = dotted.rpartition(".")
+    # note (lennox): module_name is already "sglang_omni.models...", so the
+    # base path is the repo root (two parents up from sglang_omni/models/),
+    # not _MODELS_DIR.parent -- that doubled the sglang_omni segment and made
+    # this fallback raise FileNotFoundError for every factory whose import
+    # legitimately fails (masking the intended ImportError skip/fallback).
     source = (
-        _MODELS_DIR.parent / (module_name.replace(".", "/") + ".py")
+        _MODELS_DIR.parent.parent / (module_name.replace(".", "/") + ".py")
     ).read_text(encoding="utf-8")
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.FunctionDef) and node.name == func_name:
             args = node.args
             positional = args.posonlyargs + args.args
             defaults = [...] * (len(positional) - len(args.defaults)) + [
-                ast.literal_eval(d) for d in args.defaults
+                _literal_default(d) for d in args.defaults
             ]
             params = dict(zip((a.arg for a in positional), defaults))
             for a, d in zip(args.kwonlyargs, args.kw_defaults):
-                params[a.arg] = ... if d is None else ast.literal_eval(d)
+                params[a.arg] = ... if d is None else _literal_default(d)
             return params
     raise AssertionError(f"factory {dotted} not found in {module_name}")
 
 
-def _gpu_stage_ids():
-    return [
-        pytest.param(model, label, stage, id=f"{model}-{label}-{stage.name}")
-        for model, label, stage in _iter_stages()
-        if stage.gpu is not None and (model, stage.name) not in _CPU_ONLY_GPU_PLACED
-    ]
+# note (lennox): dots.tts, minimax_music3, and zonos2's tts_engine are
+# CUDA-only models -- their factories raise on torch.cuda.is_available()
+# before this test's mocked resolve_checkpoint/pre_infra_setup shortcuts ever
+# run, so they need a real accelerator even though every other GPU stage here
+# is fully mocked. A static set, not a runtime probe: PR #1664 requires
+# accelerator marks to be declared unconditionally (tests/README.md), since
+# marker filtering happens after test modules import.
+_REQUIRES_REAL_ACCELERATOR = {
+    ("dots_tts", "reference_encode"),
+    ("dots_tts", "latent_engine"),
+    ("dots_tts", "vocoder"),
+    ("minimax_music3", "minimax_music3_ar"),
+    ("minimax_music3", "dit_dav"),
+    ("zonos2", "tts_engine"),
+}
+
+
+def _gpu_stage_ids(*, mark_accelerator=False):
+    ids = []
+    for model, label, stage in _iter_stages():
+        if stage.gpu is None or (model, stage.name) in _CPU_ONLY_GPU_PLACED:
+            continue
+        marks = (
+            [pytest.mark.accelerator]
+            if mark_accelerator and (model, stage.name) in _REQUIRES_REAL_ACCELERATOR
+            else []
+        )
+        ids.append(
+            pytest.param(
+                model, label, stage, id=f"{model}-{label}-{stage.name}", marks=marks
+            )
+        )
+    return ids
 
 
 @pytest.mark.parametrize("model,label,stage", _gpu_stage_ids())
@@ -120,7 +166,7 @@ def _arm_device_spec_resolvers(monkeypatch):
     )
 
 
-@pytest.mark.parametrize("model,label,stage", _gpu_stage_ids())
+@pytest.mark.parametrize("model,label,stage", _gpu_stage_ids(mark_accelerator=True))
 def test_gpu_stage_factories_forward_gpu_id_into_device_spec_resolution(
     monkeypatch, model, label, stage
 ):
@@ -236,7 +282,27 @@ _ENGINE_FACTORIES = {
 }
 
 
-@pytest.mark.parametrize("model", sorted(_ENGINE_FACTORIES))
+# note (lennox): same three CUDA-only models as _REQUIRES_REAL_ACCELERATOR
+# above, at this test's per-model granularity (one factory per model here,
+# vs one per GPU stage there).
+_ACCELERATOR_ONLY_ENGINE_MODELS = {"dots_tts", "minimax_music3", "zonos2"}
+
+
+def _engine_factory_ids():
+    return [
+        pytest.param(
+            model,
+            marks=(
+                [pytest.mark.accelerator]
+                if model in _ACCELERATOR_ONLY_ENGINE_MODELS
+                else []
+            ),
+        )
+        for model in sorted(_ENGINE_FACTORIES)
+    ]
+
+
+@pytest.mark.parametrize("model", _engine_factory_ids())
 def test_engine_factories_bind_the_placed_gpu(monkeypatch, model):
     factory_path, builder_module, builder_class = _ENGINE_FACTORIES[model]
     try:
@@ -284,13 +350,22 @@ def test_engine_factories_bind_the_placed_gpu(monkeypatch, model):
 # passes gpu_id=2, so it never exercises this ambient-platform path.
 _MODELS = sorted(p.parent.name for p in _MODELS_DIR.glob("*/config.py"))
 
-# Every stage that relies on device=None. Adding one means adding a test below that
-# proves the factory resolves it.
+# Every stage that relies on device=None. A stage whose factory has its own
+# resolution logic (the qwen3_omni entries below) needs a bespoke test proving
+# it resolves None correctly. A stage that only forwards into
+# SGLangGenerationEngineBuilder.build() does not: T1/T3 above already prove it
+# reaches the shared builder, and the builder's own None-handling is covered
+# once, generically, in test_server_args_builder_device.py.
 _NONE_DEVICE_STAGES = {
+    ("arkasr", "asr"),
+    ("fishaudio_s2_pro", "tts_engine"),
+    ("fun_asr", "asr"),
+    ("moss_transcribe_diarize", "asr"),
     ("qwen3_asr", "asr"),
     ("qwen3_omni", "audio_encoder"),
     ("qwen3_omni", "code2wav"),
     ("qwen3_omni", "image_encoder"),
+    ("whisper_asr", "asr"),
 }
 
 
