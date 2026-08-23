@@ -568,11 +568,8 @@ def test_voxtral_generation_reenables_cuda_graph_after_bootstrap(
         lambda **kwargs: SimpleNamespace(**kwargs),
     )
 
-    # note (lennox): gpu_id pinned explicitly, matching how placement always
-    # calls this factory -- device="cuda" with no gpu_id would otherwise ask
-    # the ambient platform which card the process is on, which isn't
-    # implemented on a host with no real accelerator (this test only mocks
-    # the infra build, not a specific device).
+    # note (lennox): gpu_id pinned explicitly (matches real placement calls) --
+    # device alone would hit the ambient-platform fallback, unavailable here.
     scheduler = stages.create_generation_executor("model", device="cuda", gpu_id=0)
 
     assert build_kwargs["disable_cuda_graph"] is False

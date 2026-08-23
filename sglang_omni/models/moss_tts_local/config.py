@@ -31,12 +31,8 @@ _PREPROCESSING_MAX_CONCURRENCY = 16
 _MAX_PIPELINE_INTRAOP_THREADS = 8
 
 
-# note (lennox): codec_gpu only moves the vocoder. preprocessing shares
-# tts_engine's OS process no matter what -- it hands prepared requests to the
-# AR stage through a module-level in-memory queue (see process_local_edges
-# below), which only exists within one process, so it can't follow the
-# vocoder to a separate GPU without a real cross-process channel replacing
-# that queue.
+# note (lennox): codec_gpu only moves vocoder -- preprocessing shares an
+# in-process queue with tts_engine (see process_local_edges), so it can't move.
 def _stages(*, codec_gpu: int, colocated: bool) -> list[StageConfig]:
     preprocessing_runtime = StageRuntimeConfig(
         resources=StageResourceConfig(
@@ -253,10 +249,8 @@ class MossTTSLocalColocatedPipelineConfig(MossTTSLocalPipelineConfig):
 class MossTTSLocalSplitPipelineConfig(MossTTSLocalPipelineConfig):
     """Two-GPU variant that places codec work on the second visible GPU."""
 
-    # note (lennox): no process_local_edges override -- tts_engine -> vocoder
-    # is exactly the edge this variant splits across processes, so it must not
-    # be declared local. The base class's preprocessing/tts_engine constraint
-    # is the only local edge here too.
+    # note (lennox): no process_local_edges override -- tts_engine->vocoder is
+    # the edge this variant splits, so it must stay off the "must be local" set.
 
     stages: list[StageConfig] = Field(
         default_factory=lambda: _stages(codec_gpu=1, colocated=False)

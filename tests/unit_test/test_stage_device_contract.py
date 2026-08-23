@@ -34,13 +34,8 @@ def _iter_stages():
                 yield model, label, stage
 
 
-# note (lennox): only device/gpu_id's own defaults are ever asserted on below,
-# and R3 always writes those as a bare `None` literal -- but ast.literal_eval
-# still runs over every OTHER parameter's default first, and a real default
-# like `_SOME_CONSTANT` (a Name) or `64 * 1024 * 1024` (a BinOp) isn't a
-# literal, so it would raise before device/gpu_id are ever reached. Ellipsis
-# stands in for "not a literal", same sentinel already used for
-# no-default-at-all.
+# note (lennox): only device/gpu_id are asserted on below, but a non-literal
+# default elsewhere (a name, an arithmetic expr) would raise before reaching them.
 def _literal_default(node: ast.expr) -> object:
     try:
         return ast.literal_eval(node)
@@ -57,11 +52,8 @@ def _factory_parameters(dotted: str) -> dict[str, object]:
     except ImportError:
         pass
     module_name, _, func_name = dotted.rpartition(".")
-    # note (lennox): module_name is already "sglang_omni.models...", so the
-    # base path is the repo root (two parents up from sglang_omni/models/),
-    # not _MODELS_DIR.parent -- that doubled the sglang_omni segment and made
-    # this fallback raise FileNotFoundError for every factory whose import
-    # legitimately fails (masking the intended ImportError skip/fallback).
+    # note (lennox): module_name already starts with "sglang_omni", so the
+    # base path is the repo root, not _MODELS_DIR.parent (doubled the segment).
     source = (
         _MODELS_DIR.parent.parent / (module_name.replace(".", "/") + ".py")
     ).read_text(encoding="utf-8")
@@ -79,13 +71,8 @@ def _factory_parameters(dotted: str) -> dict[str, object]:
     raise AssertionError(f"factory {dotted} not found in {module_name}")
 
 
-# note (lennox): dots.tts, minimax_music3, and zonos2's tts_engine are
-# CUDA-only models -- their factories raise on torch.cuda.is_available()
-# before this test's mocked resolve_checkpoint/pre_infra_setup shortcuts ever
-# run, so they need a real accelerator even though every other GPU stage here
-# is fully mocked. A static set, not a runtime probe: PR #1664 requires
-# accelerator marks to be declared unconditionally (tests/README.md), since
-# marker filtering happens after test modules import.
+# note (lennox): these three raise on torch.cuda.is_available() before this
+# test's mocks run, so they need a static accelerator mark (tests/README.md).
 _REQUIRES_REAL_ACCELERATOR = {
     ("dots_tts", "reference_encode"),
     ("dots_tts", "latent_engine"),
@@ -204,9 +191,8 @@ def test_gpu_stage_factories_forward_gpu_id_into_device_spec_resolution(
         )
 
 
-# note (lennox): forwarding into device-spec resolution is not the same as
-# binding its result. code below drives the real build() chain and asserts the
-# device/gpu_id the builder fixes at pre_infra_setup, before any weight loading.
+# note (lennox): forwarding into resolve_device_spec isn't the same as binding
+# its result -- this drives the real build() chain and checks what it fixed.
 _ENGINE_FACTORIES = {
     "arkasr": (
         "sglang_omni.models.arkasr.stages.create_sglang_arkasr_executor",
@@ -282,9 +268,8 @@ _ENGINE_FACTORIES = {
 }
 
 
-# note (lennox): same three CUDA-only models as _REQUIRES_REAL_ACCELERATOR
-# above, at this test's per-model granularity (one factory per model here,
-# vs one per GPU stage there).
+# note (lennox): same three CUDA-only models as _REQUIRES_REAL_ACCELERATOR,
+# at this test's per-model (not per-stage) granularity.
 _ACCELERATOR_ONLY_ENGINE_MODELS = {"dots_tts", "minimax_music3", "zonos2"}
 
 
@@ -342,20 +327,12 @@ def test_engine_factories_bind_the_placed_gpu(monkeypatch, model):
     assert final == {"device": "cuda:2", "gpu_id": 2}
 
 
-# note (lennox): predates this file's model x topology x stage sweep above (PR
-# #994, #1628) and checks something the sweep does not: what an *unspecified*
-# device (no gpu_id either) resolves to for the small set of factories that were
-# already contract-compliant before this refactor. The sweep's own T3
-# (test_gpu_stage_factories_forward_gpu_id_into_device_spec_resolution) always
-# passes gpu_id=2, so it never exercises this ambient-platform path.
+# note (lennox): from PR #994/#1628. Checks a fully unspecified device (no
+# gpu_id either) -- the sweep above always passes gpu_id=2, so never covers this.
 _MODELS = sorted(p.parent.name for p in _MODELS_DIR.glob("*/config.py"))
 
-# Every stage that relies on device=None. A stage whose factory has its own
-# resolution logic (the qwen3_omni entries below) needs a bespoke test proving
-# it resolves None correctly. A stage that only forwards into
-# SGLangGenerationEngineBuilder.build() does not: T1/T3 above already prove it
-# reaches the shared builder, and the builder's own None-handling is covered
-# once, generically, in test_server_args_builder_device.py.
+# note (lennox): qwen3_omni entries need a bespoke test (own resolution logic);
+# the rest only forward into the shared builder, covered in test_server_args_builder_device.py.
 _NONE_DEVICE_STAGES = {
     ("arkasr", "asr"),
     ("fishaudio_s2_pro", "tts_engine"),

@@ -66,10 +66,8 @@ class SGLangGenerationEngineBuilder(ABC):
             else place_device_spec(device, gpu_id)
         )
         concrete_device = torch.device(device)
-        # note (lennox): an unplaced GPU stage (no stage.gpu, no explicit
-        # gpu_id) must bind to whatever card this process is already on, not
-        # card 0 -- a TP follower or a standalone build() call can already be
-        # pinned to a different card by the time this runs.
+        # note (lennox): binds to this process's actual card, not 0 -- a TP
+        # follower can already be pinned to a different one.
         if concrete_device.type != "cpu" and concrete_device.index is None:
             concrete_device = current_platform.get_device(
                 torch.get_device_module().current_device()

@@ -22,11 +22,8 @@ def _expanded_replica_stages():
 
 def test_engine_factory_rejects_process_replica_device_injection() -> None:
     config, by_name = _expanded_replica_stages()
-    # note (lennox): fishaudio_s2_pro's real tts_engine factory now declares
-    # gpu_id (contract fix), so it can no longer stand in for "a factory that
-    # doesn't accept gpu_id" -- swap in a fixture that genuinely lacks the
-    # parameter instead of coupling this rejection path to a real model's
-    # current compliance state.
+    # note (lennox): tts_engine now declares gpu_id (contract fix), so swap in
+    # a fixture that genuinely lacks it instead of coupling to a real model.
     stage = by_name["tts_engine@r0"].model_copy(
         update={"factory": fake_factory_path("runtime_factory_without_gpu_id")}
     )

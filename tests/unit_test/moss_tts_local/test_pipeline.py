@@ -480,8 +480,8 @@ def test_pipeline_stage_wiring():
 
     split = MossTTSLocalSplitPipelineConfig(model_path="OpenMOSS-Team/moss-local-test")
     split_stages = {stage.name: stage for stage in split.stages}
-    # preprocessing can't follow the codec to a second GPU: it hands prepared
-    # requests to tts_engine through a same-process in-memory queue.
+    # note (lennox): preprocessing can't follow the codec -- it hands requests
+    # to tts_engine through a same-process in-memory queue.
     assert split_stages["preprocessing"].gpu == 0
     assert split_stages["tts_engine"].gpu == 0
     split_runtime = split_stages["tts_engine"].runtime
@@ -493,9 +493,8 @@ def test_pipeline_stage_wiring():
     )
     assert split_stages["vocoder"].runtime.resources.total_gpu_memory_fraction is None
     assert split_stages["vocoder"].gpu == 1
-    # vocoder is a real second GPU here, so it needs its own OS process --
-    # sharing "pipeline" with tts_engine (GPU 0) would ask one process to be
-    # on two GPUs at once.
+    # note (lennox): vocoder is a real second GPU, so it needs its own OS
+    # process -- sharing "pipeline" would put one process on two GPUs.
     assert split_stages["vocoder"].process == "vocoder"
     split_topology = build_compiled_process_topology(split)
     assert [(group.name, group.stage_names) for group in split_topology.groups] == [

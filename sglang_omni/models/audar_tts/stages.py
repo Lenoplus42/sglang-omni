@@ -239,10 +239,8 @@ def create_tts_engine_executor(
             "Audar-TTS requires the 'audar-tts' optional dependencies"
         ) from exc
 
-    # note (lennox): llama.cpp's main_gpu is just an index, not a torch device
-    # string -- there's no type to resolve against the host platform, so this
-    # skips resolve_device_spec and takes gpu_id as-is. device stays in the
-    # signature only so placement can always call this factory the same way.
+    # note (lennox): llama.cpp's main_gpu is a bare index, not a device
+    # string -- gpu_id goes straight through; device stays for a uniform signature.
     del device
     main_gpu = int(gpu_id) if gpu_id is not None else 0
     model_file = _resolve_gguf(model_path, gguf_filename, model_revision)
