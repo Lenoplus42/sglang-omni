@@ -781,8 +781,8 @@ def _run_s2pro_engine_with_fake_buffers(
 
     monkeypatch.setattr(stages, "_compile_s2pro_codebook_decoder", fake_compile)
 
-    # note (lennox): gpu_id pinned explicitly (matches real placement calls) --
-    # device alone would hit the ambient-platform fallback, unavailable here.
+    # note (lennox): gpu_id=0 keeps this deterministic -- without it, build()
+    # asks the real platform which GPU the process is on, which this mocked test can't answer.
     scheduler = stages.create_sglang_tts_engine_executor(
         "model",
         device="cuda",

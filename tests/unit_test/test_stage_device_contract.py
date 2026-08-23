@@ -71,8 +71,8 @@ def _factory_parameters(dotted: str) -> dict[str, object]:
     raise AssertionError(f"factory {dotted} not found in {module_name}")
 
 
-# note (lennox): these three raise on torch.cuda.is_available() before this
-# test's mocks run, so they need a static accelerator mark (tests/README.md).
+# note (lennox): these factories raise on torch.cuda.is_available() before
+# this test's mocks run, so they need a static accelerator mark (tests/README.md).
 _REQUIRES_REAL_ACCELERATOR = {
     ("dots_tts", "reference_encode"),
     ("dots_tts", "latent_engine"),
