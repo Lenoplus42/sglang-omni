@@ -826,7 +826,15 @@ def create_preprocessing_executor(
     return SimpleScheduler(_preprocess)
 
 
-def create_aggregate_executor():
+def create_aggregate_executor(
+    *,
+    device: str | None = None,
+    gpu_id: int | None = None,
+):
+    # note (lennox): the "text" topology places this identity stage on a GPU
+    # (colocation, not compute) -- accepts device/gpu_id only so placement can
+    # call it like every other GPU-placed stage; neither is used.
+    del device, gpu_id
     from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
 
     def _identity(payload: StagePayload) -> StagePayload:
@@ -839,12 +847,13 @@ def create_image_encoder_executor(
     model_path: str,
     *,
     device: str | None = None,
+    gpu_id: int | None = None,
     dtype: str | None = None,
 ):
     from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
     from sglang_omni.utils.device import resolve_device_spec
 
-    device = resolve_device_spec(device)
+    device = resolve_device_spec(device, gpu_id)
     model = Qwen3OmniImageEncoder(model_path=model_path, device=device, dtype=dtype)
     cache = StageOutputCache(
         max_size=QWEN3_ENCODER_CACHE_MAX_ENTRIES,
@@ -913,13 +922,14 @@ def create_audio_encoder_executor(
     model_path: str,
     *,
     device: str | None = None,
+    gpu_id: int | None = None,
     dtype: str | None = None,
     enable_layer_cuda_graph: bool = False,
 ):
     from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
     from sglang_omni.utils.device import resolve_device_spec
 
-    device = resolve_device_spec(device)
+    device = resolve_device_spec(device, gpu_id)
     model = Qwen3OmniAudioEncoder(
         model_path=model_path,
         device=device,
@@ -998,7 +1008,8 @@ def create_decode_executor(model_path: str):
 def create_sglang_thinker_executor_from_config(
     model_path: str,
     *,
-    gpu_id: int = 0,
+    device: str | None = None,
+    gpu_id: int | None = None,
     tp_rank: int = 0,
     tp_size: int = 1,
     nccl_port: int | None = None,
@@ -1014,6 +1025,11 @@ def create_sglang_thinker_executor_from_config(
     prefill_coalesce_when_idle: bool = False,
 ):
     """Returns OmniScheduler for thinker."""
+    from sglang_omni.utils.device import resolve_concrete_device
+
+    # note (lennox): create_thinker_scheduler takes a bare gpu_id int, no
+    # device-string concept -- same resolution as the shared engine builder.
+    gpu_id = resolve_concrete_device(device, gpu_id).index or 0
     # note (luojiaxuan):
     # The thinker runs prefill XOR decode per scheduler step, so under
     # concurrent streaming a large fraction of steps are prefill-only while
@@ -1123,7 +1139,8 @@ def create_sglang_thinker_executor_from_config(
 def create_talker_ar_executor_from_config(
     model_path: str,
     *,
-    gpu_id: int = 0,
+    device: str | None = None,
+    gpu_id: int | None = None,
     tp_rank: int = 0,
     tp_size: int = 1,
     nccl_port: int | None = None,
@@ -1138,6 +1155,11 @@ def create_talker_ar_executor_from_config(
 ):
     """Returns OmniScheduler for talker."""
     from sglang_omni.models.qwen3_omni.bootstrap import create_talker_scheduler
+    from sglang_omni.utils.device import resolve_concrete_device
+
+    # note (lennox): create_talker_scheduler takes a bare gpu_id int, no
+    # device-string concept -- same resolution as the shared engine builder.
+    gpu_id = resolve_concrete_device(device, gpu_id).index or 0
 
     # Note (Xuesong, Chenyang): cuda_graph defaults to ON for the talker
     # after #384, which routed talker MoE through `self.experts` (FusedMoE)
