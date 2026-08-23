@@ -7,6 +7,7 @@ from sglang_omni.config import ProcessConfig, resolve_stage_factory_args
 from sglang_omni.config.topology import compile_logical_processes
 from sglang_omni.models.fishaudio_s2_pro.config import S2ProPipelineConfig
 from sglang_omni.pipeline.replicas import expand_replica_stages
+from tests.unit_test.fixtures.pipeline_fakes import fake_factory_path
 
 
 def _expanded_replica_stages():
@@ -21,12 +22,20 @@ def _expanded_replica_stages():
 
 def test_engine_factory_rejects_process_replica_device_injection() -> None:
     config, by_name = _expanded_replica_stages()
+    # note (lennox): fishaudio_s2_pro's real tts_engine factory now declares
+    # gpu_id (contract fix), so it can no longer stand in for "a factory that
+    # doesn't accept gpu_id" -- swap in a fixture that genuinely lacks the
+    # parameter instead of coupling this rejection path to a real model's
+    # current compliance state.
+    stage = by_name["tts_engine@r0"].model_copy(
+        update={"factory": fake_factory_path("runtime_factory_without_gpu_id")}
+    )
 
     with pytest.raises(
         ValueError,
         match="tts_engine@r0.*replica_devices.*does not declare a gpu_id parameter",
     ):
-        resolve_stage_factory_args(by_name["tts_engine@r0"], config, gpu_id=1)
+        resolve_stage_factory_args(stage, config, gpu_id=1)
 
 
 def test_vocoder_factory_accepts_each_process_replica_gpu_id() -> None:
