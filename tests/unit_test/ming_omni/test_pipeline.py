@@ -314,9 +314,8 @@ def test_ming_talker_factory_returns_scheduler_contract(monkeypatch) -> None:
 
     from sglang_omni.models.ming_omni.stages import create_talker_executor
 
-    # note (lennox): device left None -- create_talker_executor routes through
-    # resolve_device_spec, which validates an explicit type against the host;
-    # this only needs gpu_id, matching how placement actually calls it.
+    # note (lennox): device left None -- resolve_device_spec would validate an
+    # explicit "cuda" against this host's actual (non-CUDA) platform type.
     scheduler = create_talker_executor(
         model_path="dummy",
         talker_model_path="talker",

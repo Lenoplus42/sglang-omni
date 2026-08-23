@@ -832,8 +832,7 @@ def create_aggregate_executor(
     gpu_id: int | None = None,
 ):
     # note (lennox): the "text" topology places this identity stage on a GPU
-    # (colocation, not compute) -- accepts device/gpu_id only so placement can
-    # call it like every other GPU-placed stage; neither is used.
+    # for colocation, not compute -- accepts device/gpu_id but never uses them.
     del device, gpu_id
     from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
 

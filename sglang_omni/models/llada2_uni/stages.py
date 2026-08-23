@@ -98,8 +98,7 @@ def create_sglang_dllm_thinker_executor_from_config(
     from sglang_omni.utils.device import resolve_concrete_device
 
     # note (lennox): create_dllm_thinker_scheduler takes a bare gpu_id int, no
-    # device-string concept -- resolve down to a concrete index the same way
-    # the shared SGLang engine builder does (asks the host, not 0, if unset).
+    # device-string concept -- same resolution as the shared engine builder.
     resolved_gpu_id = resolve_concrete_device(device, gpu_id).index or 0
 
     overrides: dict[str, Any] = {

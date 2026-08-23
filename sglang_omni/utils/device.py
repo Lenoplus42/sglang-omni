@@ -46,12 +46,11 @@ def place_device_spec(device: str, index: int | None = None) -> str:
 
 
 def resolve_concrete_device(device: str | None, index: int | None = None) -> "torch.device":
-    """Resolve device/index to a concrete torch.device, an index included.
+    """Resolve device/index to a concrete torch.device with an index.
 
-    resolve_device_spec/place_device_spec can return a bare type (e.g. "cuda")
-    when neither the caller nor placement supplied an index. A caller that
-    needs a concrete gpu_id asks the host which card this process is already
-    on, rather than assuming 0.
+    Falls back to asking the host which card this process is already on
+    when neither the caller nor placement supplied an index, rather than
+    assuming 0.
     """
     import torch
 
