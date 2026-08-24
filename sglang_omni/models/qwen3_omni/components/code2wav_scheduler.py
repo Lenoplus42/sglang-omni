@@ -30,7 +30,6 @@ from sglang_omni.proto import StagePayload
 from sglang_omni.scheduling.messages import OutgoingMessage
 from sglang_omni.scheduling.streaming_vocoder import StreamingVocoderBase
 from sglang_omni.utils.audio_payload import audio_waveform_payload
-from sglang_omni.utils.device import resolve_device_spec
 
 logger = logging.getLogger(__name__)
 
@@ -1001,6 +1000,8 @@ def create_code2wav_scheduler(
             "Code2Wav CUDA graph requires "
             "runtime.resources.total_gpu_memory_fraction"
         )
+    from sglang_omni.utils.device import resolve_device_spec
+
     concrete_device = torch.device(resolve_device_spec(device, gpu_id))
     if concrete_device.type != "cpu" and concrete_device.index is None:
         concrete_device = current_platform.get_device(

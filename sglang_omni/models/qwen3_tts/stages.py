@@ -26,7 +26,6 @@ from sglang_omni.models.qwen3_tts.streaming_vocoder import (
 from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
 from sglang_omni.scheduling.threaded_simple_scheduler import ThreadedSimpleScheduler
 from sglang_omni.utils.checkpoint import resolve_checkpoint as _resolve_checkpoint
-from sglang_omni.utils.device import resolve_device_spec
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +183,8 @@ def create_vocoder_executor(
     initial_cuda_graph: bool = True,
     enable_deterministic_inference: bool = False,
 ) -> SimpleScheduler:
+    from sglang_omni.utils.device import resolve_device_spec
+
     device = resolve_device_spec(device, gpu_id)
     tokenizer = _load_qwen3_tts_tokenizer(
         model_path,

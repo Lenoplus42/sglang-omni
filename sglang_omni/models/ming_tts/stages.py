@@ -111,6 +111,7 @@ def create_reference_encode_executor(
     from sglang_omni.models.ming_tts.reference_encode import MingTTSReferenceEncoder
     from sglang_omni.utils.device import resolve_device_spec
 
+    device = resolve_device_spec(device, gpu_id)
     checkpoint_dir = _resolve_checkpoint(model_path)
     config = _load_ming_tts_config(checkpoint_dir)
     context_length = int(context_length or _resolve_context_length(config))
@@ -118,7 +119,6 @@ def create_reference_encode_executor(
         checkpoint_dir,
         llm_config=config.llm_config,
     )
-    device = resolve_device_spec(device, gpu_id)
 
     audio_config = resolve_ming_tts_audio_vae_config(
         config.audio_tokenizer_config,
@@ -174,9 +174,9 @@ def create_audio_decode_executor(
     )
     from sglang_omni.utils.device import resolve_device_spec
 
+    device = resolve_device_spec(device, gpu_id)
     checkpoint_dir = _resolve_checkpoint(model_path)
     config = _load_ming_tts_config(checkpoint_dir)
-    device = resolve_device_spec(device, gpu_id)
 
     audio_config = resolve_ming_tts_audio_vae_config(
         config.audio_tokenizer_config,

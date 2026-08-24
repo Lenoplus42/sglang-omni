@@ -68,7 +68,6 @@ from sglang_omni.scheduling.speaker_cache import (
 )
 from sglang_omni.scheduling.stage_cache import StageOutputCache
 from sglang_omni.scheduling.threaded_simple_scheduler import ThreadedSimpleScheduler
-from sglang_omni.utils.device import resolve_device_spec
 
 logger = logging.getLogger(__name__)
 
@@ -390,6 +389,8 @@ def create_audio_encoder_executor(
     client-supplied pre-encoded fast path). Codec weights are extracted from
     the TTS checkpoint itself (bundled at ``tied.embedding.modality_embeddings``).
     """
+    from sglang_omni.utils.device import resolve_device_spec
+
     device = resolve_device_spec(device, gpu_id)
     checkpoint_dir = resolve_checkpoint(model_path)
     raw = Tokenizer.from_file(os.path.join(checkpoint_dir, "tokenizer.json"))
@@ -536,8 +537,10 @@ def create_vocoder_executor(
     # so there is deliberately no startup validation here. The default
     # tuple(range(1, 151)) in config.py covers the default 75+75 strides with
     # margin; when overriding strides, re-derive the domain empirically.
-    checkpoint_dir = resolve_checkpoint(model_path)
+    from sglang_omni.utils.device import resolve_device_spec
+
     device = resolve_device_spec(device, gpu_id)
+    checkpoint_dir = resolve_checkpoint(model_path)
     codec = get_or_load_codec(checkpoint_dir, device, dtype)
     if compile_decode:
         eager_decode = codec.model.decode

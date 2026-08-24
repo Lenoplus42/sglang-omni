@@ -13,6 +13,7 @@ from sglang_omni.models.higgs_tts import stages
 from sglang_omni.models.higgs_tts.config import HiggsTtsPipelineConfig
 from sglang_omni.pipeline.mp_runner import _build_stage_groups
 from sglang_omni.pipeline.runtime_config import prepare_pipeline_runtime
+from sglang_omni.utils import device as device_mod
 from sglang_omni.utils.imports import import_string
 from tests.unit_test.fixtures.pipeline_fakes import FakeMpContext
 
@@ -105,7 +106,9 @@ def test_higgs_audio_encoder_resolves_placement_gpu_id(monkeypatch) -> None:
         codec_loads.append((checkpoint, device, dtype))
         return fake_codec
 
-    monkeypatch.setattr(stages, "resolve_device_spec", resolve)
+    # note (lennox): create_audio_encoder_executor imports resolve_device_spec
+    # locally now, so patching it needs the real module, not this re-export.
+    monkeypatch.setattr(device_mod, "resolve_device_spec", resolve)
     monkeypatch.setattr(stages, "resolve_checkpoint", lambda model_path: model_path)
     monkeypatch.setattr(stages.Tokenizer, "from_file", lambda _path: object())
     monkeypatch.setattr(
