@@ -56,15 +56,12 @@ class SGLangGenerationEngineBuilder(ABC):
 
         from sglang_omni.scheduling import bootstrap as scheduling_bootstrap
         from sglang_omni.scheduling import sglang_backend
-        from sglang_omni.utils.device import place_device_spec, resolve_device_spec
+        from sglang_omni.utils.device import resolve_concrete_device
 
         checkpoint_dir = self.resolve_checkpoint(model_path)
-        device = (
-            resolve_device_spec(None, gpu_id)
-            if device is None
-            else place_device_spec(device, gpu_id)
-        )
-        gpu_id = torch.device(device).index or 0
+        concrete_device = resolve_concrete_device(device, gpu_id)
+        device = str(concrete_device)
+        gpu_id = concrete_device.index or 0
         self.checkpoint_dir = checkpoint_dir
         self.device = device
         self.gpu_id = gpu_id
