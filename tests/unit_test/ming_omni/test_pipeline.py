@@ -317,7 +317,7 @@ def test_ming_talker_factory_returns_scheduler_contract(monkeypatch) -> None:
     scheduler = create_talker_executor(
         model_path="dummy",
         talker_model_path="talker",
-        device="cuda:1",
+        gpu_id=1,
         voice="DB30",
     )
 

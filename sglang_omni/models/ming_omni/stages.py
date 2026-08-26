@@ -213,12 +213,15 @@ def create_streaming_segmenter_executor(
 def create_audio_encoder_executor(
     model_path: str,
     *,
-    device: str = "cuda",
+    device: str | None = None,
+    gpu_id: int | None = None,
     dtype: str | None = None,
 ):
     from sglang_omni.models.ming_omni.components.audio_encoder import MingAudioEncoder
     from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
+    from sglang_omni.utils.device import resolve_device_spec
 
+    device = resolve_device_spec(device, gpu_id)
     model = MingAudioEncoder(model_path=model_path, device=device, dtype=dtype)
 
     def _encode(payload: StagePayload) -> StagePayload:
@@ -244,7 +247,8 @@ def create_audio_encoder_executor(
 def create_image_encoder_executor(
     model_path: str,
     *,
-    device: str = "cuda",
+    device: str | None = None,
+    gpu_id: int | None = None,
     dtype: str | None = None,
     tp_rank: int = 0,
     tp_size: int = 1,
@@ -252,7 +256,9 @@ def create_image_encoder_executor(
 ):
     from sglang_omni.models.ming_omni.components.image_encoder import MingImageEncoder
     from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
+    from sglang_omni.utils.device import resolve_device_spec
 
+    device = resolve_device_spec(device, gpu_id)
     model = MingImageEncoder(
         model_path=model_path,
         device=device,
@@ -284,7 +290,8 @@ def create_image_encoder_executor(
 def create_sglang_thinker_executor_from_config(
     model_path: str,
     *,
-    gpu_id: int = 0,
+    device: str | None = None,
+    gpu_id: int | None = None,
     tp_rank: int = 0,
     tp_size: int = 1,
     nccl_port: int | None = None,
@@ -297,8 +304,11 @@ def create_sglang_thinker_executor_from_config(
     from sglang_omni.models.ming_omni.bootstrap import create_thinker_scheduler
     from sglang_omni.models.ming_omni.registration import register_ming_hf_config
     from sglang_omni.scheduling.sglang_backend import build_sglang_server_args
+    from sglang_omni.utils.device import resolve_concrete_device
 
     register_ming_hf_config()
+
+    gpu_id = resolve_concrete_device(device, gpu_id).index or 0
 
     overrides = dict(server_args_overrides or {})
     overrides.setdefault("sampling_backend", "pytorch")
@@ -324,7 +334,8 @@ def create_talker_executor(
     model_path: str,
     *,
     talker_model_path: str | None = None,
-    device: str = "cuda",
+    device: str | None = None,
+    gpu_id: int | None = None,
     voice: str = "DB30",
 ):
     from sglang_omni.models.ming_omni.components.talker_executor import (
@@ -332,7 +343,9 @@ def create_talker_executor(
     )
     from sglang_omni.models.weight_loader import resolve_model_path
     from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
+    from sglang_omni.utils.device import resolve_device_spec
 
+    device = resolve_device_spec(device, gpu_id)
     local_path = resolve_model_path(model_path)
     executor = MingTalkerExecutor(
         model_path=local_path,
@@ -358,7 +371,8 @@ def create_talker_executor(
 def create_streaming_talker_executor(
     model_path: str,
     *,
-    device: str = "cuda",
+    device: str | None = None,
+    gpu_id: int | None = None,
     voice: str = "DB30",
 ):
     """Factory for the streaming TTS talker stage.
@@ -371,7 +385,9 @@ def create_streaming_talker_executor(
         MingStreamingTalkerScheduler,
     )
     from sglang_omni.models.weight_loader import resolve_model_path
+    from sglang_omni.utils.device import resolve_device_spec
 
+    device = resolve_device_spec(device, gpu_id)
     local_path = resolve_model_path(model_path)
     return MingStreamingTalkerScheduler(
         model_path=local_path,
