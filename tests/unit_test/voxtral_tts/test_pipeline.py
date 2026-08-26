@@ -566,7 +566,7 @@ def test_voxtral_generation_reenables_cuda_graph_after_bootstrap(
         lambda **kwargs: SimpleNamespace(**kwargs),
     )
 
-    scheduler = stages.create_generation_executor("model", device="cuda:0")
+    scheduler = stages.create_generation_executor("model", device="cuda")
 
     assert build_kwargs["disable_cuda_graph"] is False
     assert build_kwargs["cuda_graph_bs"] == [1, 2, 4, 8, 12, 16]

@@ -57,7 +57,7 @@ def create_preprocessing_executor(
 def create_sglang_tts_engine_executor(
     model_path: str,
     *,
-    device: str = "cuda:0",
+    device: str | None = None,
     gpu_id: int | None = None,
     dtype: str = "bfloat16",
     context_length: int | None = None,
@@ -99,7 +99,7 @@ def create_tts_engine_executor(*args, **kwargs) -> Any:
 def create_reference_encode_executor(
     model_path: str,
     *,
-    device: str = "cuda:0",
+    device: str | None = None,
     gpu_id: int | None = None,
     dtype: str = "bfloat16",
     context_length: int | None = None,
@@ -109,7 +109,9 @@ def create_reference_encode_executor(
     ref_audio_cache_max_bytes: int = 64 * 1024 * 1024,
 ) -> SimpleScheduler:
     from sglang_omni.models.ming_tts.reference_encode import MingTTSReferenceEncoder
+    from sglang_omni.utils.device import resolve_device_spec
 
+    device = resolve_device_spec(device, gpu_id)
     checkpoint_dir = _resolve_checkpoint(model_path)
     config = _load_ming_tts_config(checkpoint_dir)
     context_length = int(context_length or _resolve_context_length(config))
@@ -117,8 +119,6 @@ def create_reference_encode_executor(
         checkpoint_dir,
         llm_config=config.llm_config,
     )
-    if gpu_id is not None:
-        device = f"cuda:{gpu_id}"
 
     audio_config = resolve_ming_tts_audio_vae_config(
         config.audio_tokenizer_config,
@@ -150,7 +150,7 @@ def create_reference_encode_executor(
 def create_audio_decode_executor(
     model_path: str,
     *,
-    device: str = "cuda:0",
+    device: str | None = None,
     gpu_id: int | None = None,
     dtype: str = "bfloat16",
     keep_latents: bool = False,
@@ -172,11 +172,11 @@ def create_audio_decode_executor(
     from sglang_omni.models.ming_tts.streaming_vocoder import (
         MingTTSStreamingVocoderScheduler,
     )
+    from sglang_omni.utils.device import resolve_device_spec
 
+    device = resolve_device_spec(device, gpu_id)
     checkpoint_dir = _resolve_checkpoint(model_path)
     config = _load_ming_tts_config(checkpoint_dir)
-    if gpu_id is not None:
-        device = f"cuda:{gpu_id}"
 
     audio_config = resolve_ming_tts_audio_vae_config(
         config.audio_tokenizer_config,

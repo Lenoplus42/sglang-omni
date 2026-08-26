@@ -776,7 +776,8 @@ def _run_s2pro_engine_with_fake_buffers(
 
     scheduler = stages.create_sglang_tts_engine_executor(
         "model",
-        device="cuda:0",
+        device="cuda",
+        gpu_id=0,
         server_args_overrides=server_args_overrides,
     )
     return SimpleNamespace(
