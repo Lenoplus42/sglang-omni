@@ -30,14 +30,13 @@ _PREPROCESSING_MAX_CONCURRENCY = 16
 _MAX_PIPELINE_INTRAOP_THREADS = 8
 
 
-def _stages(*, codec_device: str, colocated: bool) -> list[StageConfig]:
+def _stages(*, codec_gpu: int, colocated: bool) -> list[StageConfig]:
     return [
         StageConfig(
             name="preprocessing",
             process="pipeline",
             factory_path=f"{_PKG}.stages.create_preprocessing_executor",
             factory=FactoryArgs(
-                device=codec_device,
                 max_concurrency=_PREPROCESSING_MAX_CONCURRENCY,
             ),
             gpu_memory_fraction=(
@@ -63,13 +62,13 @@ def _stages(*, codec_device: str, colocated: bool) -> list[StageConfig]:
         ),
         StageConfig(
             name="vocoder",
-            process="vocoder" if colocated else "pipeline",
+            process="vocoder",
             factory_path=f"{_PKG}.stages.create_vocoder_executor",
-            factory=FactoryArgs(device=codec_device),
+            factory=FactoryArgs(),
             gpu_memory_fraction=(
                 _COLOCATED_VOCODER_GPU_MEMORY_FRACTION if colocated else None
             ),
-            gpu=0,
+            gpu=codec_gpu,
             terminal=True,
             can_accept_stream_before_payload=True,
         ),
@@ -122,7 +121,7 @@ class MossTTSLocalPipelineConfig(PipelineConfig):
         return frozenset({("preprocessing", "tts_engine")})
 
     stages: list[StageConfig] = Field(
-        default_factory=lambda: _stages(codec_device="cuda:0", colocated=True)
+        default_factory=lambda: _stages(codec_gpu=0, colocated=True)
     )
 
     # Streaming-vocoder CUDA-graph knobs, passed to the vocoder factory via
@@ -225,22 +224,15 @@ class MossTTSLocalColocatedPipelineConfig(MossTTSLocalPipelineConfig):
     """Backward-compatible alias for the default single-GPU pipeline."""
 
     stages: list[StageConfig] = Field(
-        default_factory=lambda: _stages(codec_device="cuda:0", colocated=True)
+        default_factory=lambda: _stages(codec_gpu=0, colocated=True)
     )
 
 
 class MossTTSLocalSplitPipelineConfig(MossTTSLocalPipelineConfig):
     """Two-GPU variant that places codec work on the second visible GPU."""
 
-    @classmethod
-    def process_local_edges(cls) -> frozenset[tuple[str, str]]:
-        # Note (Akazaakane): split mode declares gpu=0 for placement while running the
-        # codec on cuda:1, so the colocated fractions do not describe this topology.
-        # Splitting stays unsupported here until the split variant declares its own.
-        return frozenset({("preprocessing", "tts_engine"), ("tts_engine", "vocoder")})
-
     stages: list[StageConfig] = Field(
-        default_factory=lambda: _stages(codec_device="cuda:1", colocated=False)
+        default_factory=lambda: _stages(codec_gpu=1, colocated=False)
     )
 
 
