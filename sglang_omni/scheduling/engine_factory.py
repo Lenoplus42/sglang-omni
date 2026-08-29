@@ -105,10 +105,10 @@ class SGLangGenerationEngineBuilder(ABC):
             prefill_graph_backend != CudaGraphBackend.DISABLED
             and not operator_selected_prefill_backend
         ):
-            # SGLang treats every non-default source as operator-locked. A
-            # model-qualified stage default should survive compatibility
-            # resolution, but must remain eligible for the late free-memory
-            # safety gate immediately before graph capture.
+            # SGLang treats every non-default source as operator-locked, and a
+            # locked prefill backend skips upstream's model compatibility
+            # resolution; a model-qualified stage default must stay eligible
+            # for it.
             server_args._cuda_graph_config_locked.discard(("prefill", "backend"))
         if prefill_graph_backend == CudaGraphBackend.BREAKABLE:
             if not self.supports_breakable_prefill_cuda_graph:
@@ -124,8 +124,6 @@ class SGLangGenerationEngineBuilder(ABC):
             tree_cache,
             req_to_token_pool,
             token_to_kv_pool_allocator,
-            prefill_mgr,
-            decode_mgr,
             model_config,
         ) = scheduling_bootstrap.create_sglang_infrastructure_defer_cuda_graph(
             server_args,
@@ -180,8 +178,6 @@ class SGLangGenerationEngineBuilder(ABC):
                 token_to_kv_pool_allocator=token_to_kv_pool_allocator,
                 server_args=server_args,
                 model_config=model_config,
-                prefill_manager=prefill_mgr,
-                decode_manager=decode_mgr,
             )
             self.post_scheduler_setup(scheduler, model_runner)
             return scheduler
@@ -272,8 +268,6 @@ class SGLangGenerationEngineBuilder(ABC):
         token_to_kv_pool_allocator: Any,
         server_args: Any,
         model_config: Any,
-        prefill_manager: Any,
-        decode_manager: Any,
     ) -> tuple[Any, Any]:
         request_builder, result_adapter = self.make_adapters(model)
         scheduler_kwargs = self.extra_scheduler_kwargs()
@@ -285,8 +279,6 @@ class SGLangGenerationEngineBuilder(ABC):
             token_to_kv_pool_allocator=token_to_kv_pool_allocator,
             server_args=server_args,
             model_config=model_config,
-            prefill_manager=prefill_manager,
-            decode_manager=decode_manager,
             model_runner=model_runner,
             request_builder=request_builder,
             result_adapter=result_adapter,
@@ -318,8 +310,6 @@ class SGLangGenerationEngineBuilder(ABC):
         token_to_kv_pool_allocator: Any,
         server_args: Any,
         model_config: Any,
-        prefill_manager: Any,
-        decode_manager: Any,
         model_runner: Any,
         request_builder: Any,
         result_adapter: Any,
@@ -334,8 +324,6 @@ class SGLangGenerationEngineBuilder(ABC):
             "token_to_kv_pool_allocator": token_to_kv_pool_allocator,
             "server_args": server_args,
             "model_config": model_config,
-            "prefill_manager": prefill_manager,
-            "decode_manager": decode_manager,
             "model_runner": model_runner,
             "request_builder": request_builder,
             "result_adapter": result_adapter,
@@ -411,8 +399,6 @@ class TtsEngineBuilder(SGLangGenerationEngineBuilder):
         token_to_kv_pool_allocator: Any,
         server_args: Any,
         model_config: Any,
-        prefill_manager: Any,
-        decode_manager: Any,
         model_runner: Any,
         request_builder: Any,
         result_adapter: Any,
@@ -426,8 +412,6 @@ class TtsEngineBuilder(SGLangGenerationEngineBuilder):
             token_to_kv_pool_allocator=token_to_kv_pool_allocator,
             server_args=server_args,
             model_config=model_config,
-            prefill_manager=prefill_manager,
-            decode_manager=decode_manager,
             model_runner=model_runner,
             request_builder=request_builder,
             result_adapter=result_adapter,
@@ -447,8 +431,6 @@ class TtsEngineBuilder(SGLangGenerationEngineBuilder):
         token_to_kv_pool_allocator: Any,
         server_args: Any,
         model_config: Any,
-        prefill_manager: Any,
-        decode_manager: Any,
     ) -> tuple[Any, Any]:
         model_runner = self.make_model_runner(model_worker, output_proc)
         request_builder, result_adapter = self.make_adapters(model)
@@ -459,8 +441,6 @@ class TtsEngineBuilder(SGLangGenerationEngineBuilder):
             token_to_kv_pool_allocator=token_to_kv_pool_allocator,
             server_args=server_args,
             model_config=model_config,
-            prefill_manager=prefill_manager,
-            decode_manager=decode_manager,
             model_runner=model_runner,
             request_builder=request_builder,
             result_adapter=result_adapter,
