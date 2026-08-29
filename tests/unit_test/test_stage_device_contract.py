@@ -147,7 +147,7 @@ class _Settled(Exception):
         self.index = index
 
 
-def _arm_device_spec_resolvers(monkeypatch):
+def _arm_device_spec_resolvers(monkeypatch, factory_path: str | None = None):
     import sglang_omni.utils.device as device_mod
     from sglang_omni.scheduling.engine_factory import SGLangGenerationEngineBuilder
 
@@ -156,6 +156,15 @@ def _arm_device_spec_resolvers(monkeypatch):
 
     monkeypatch.setattr(device_mod, "resolve_device_spec", _capture)
     monkeypatch.setattr(device_mod, "place_device_spec", _capture)
+    # note (lennox): a factory module that imports resolve_device_spec/place_device_spec
+    # at module scope (rather than inside the factory body) binds its own name to the
+    # pre-patch function, so patching device_mod alone is invisible to it -- patch the
+    # factory's own module too when it holds that name.
+    if factory_path is not None:
+        factory_module = importlib.import_module(factory_path.rsplit(".", 1)[0])
+        for name in ("resolve_device_spec", "place_device_spec"):
+            if name in vars(factory_module):
+                monkeypatch.setattr(factory_module, name, _capture)
     # note (lennox): builders import lazily inside factory bodies, so patch each
     # known builder class directly; MRO bypasses a base-class-only patch.
     monkeypatch.setattr(
@@ -184,7 +193,7 @@ def test_gpu_stage_factories_forward_gpu_id_into_device_spec_resolution(
 
     monkeypatch.setenv("HF_HUB_OFFLINE", "1")
     monkeypatch.setenv("TRANSFORMERS_OFFLINE", "1")
-    _arm_device_spec_resolvers(monkeypatch)
+    _arm_device_spec_resolvers(monkeypatch, factory_path=stage.factory_path)
     kwargs: dict[str, object] = {"device": None, "gpu_id": 2}
     if "model_path" in _factory_parameters(stage.factory_path):
         kwargs["model_path"] = "unused"

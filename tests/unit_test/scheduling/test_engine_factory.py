@@ -295,7 +295,7 @@ def test_tts_engine_builder_phase_order_and_override_contract(monkeypatch) -> No
 
     scheduler = RecordingBuilder().build(
         "model",
-        device="cuda:0",
+        device="cuda",
         gpu_id=2,
         server_args_overrides={
             "cuda_graph_max_bs": 8,
