@@ -55,10 +55,10 @@ def create_image_encoder_executor(
     )
     from sglang_omni.models.weight_loader import resolve_dtype
     from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
-    from sglang_omni.utils.device import resolve_device_spec
+    from sglang_omni.utils.device import resolve_concrete_device
 
     dtype = resolve_dtype(dtype)
-    device = resolve_device_spec(device, gpu_id)
+    device = str(resolve_concrete_device(device, gpu_id))
 
     model = LLaDA2ImageEncoder(model_path=model_path, device=device, dtype=dtype)
 

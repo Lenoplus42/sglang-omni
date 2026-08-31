@@ -553,9 +553,9 @@ def create_preprocessing_executor(
             "off",
             "",
         )
-    from sglang_omni.utils.device import resolve_device_spec
+    from sglang_omni.utils.device import resolve_concrete_device
 
-    device = resolve_device_spec(device, gpu_id)
+    device = str(resolve_concrete_device(device, gpu_id))
     processor = _load_moss_tts_local_processor(model_path)
     resolved_compute_dtype = resolve_moss_audio_dtype(
         compute_dtype,
@@ -654,9 +654,9 @@ def create_vocoder_executor(
     cuda_graph_frames: list[int] | None = None,
     cuda_graph_min_free_gb: float = 3.0,
 ) -> MossTTSLocalStreamingVocoderScheduler:
-    from sglang_omni.utils.device import resolve_device_spec
+    from sglang_omni.utils.device import resolve_concrete_device
 
-    device = resolve_device_spec(device, gpu_id)
+    device = str(resolve_concrete_device(device, gpu_id))
     processor = _load_moss_tts_local_processor(model_path)
     decoder_dtype = resolve_moss_audio_dtype(
         dtype,

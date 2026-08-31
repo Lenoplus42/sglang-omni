@@ -86,6 +86,13 @@ _REQUIRES_REAL_ACCELERATOR = {
 }
 
 
+# note (lennox): llama.cpp manages CUDA itself and binds a bare main_gpu index, so
+# this factory checks device type inline; resolving would drop gpu_id on cpu hosts.
+_INLINE_DEVICE_VALIDATED = {
+    ("audar_tts", "tts_engine"),
+}
+
+
 def _gpu_stage_ids(*, mark_accelerator=False):
     ids = []
     for model, label, stage in _iter_stages():
@@ -154,15 +161,15 @@ def _arm_device_spec_resolvers(monkeypatch, factory_path: str | None = None):
     def _capture(device, index=None):
         raise _Settled(device, index)
 
-    monkeypatch.setattr(device_mod, "resolve_device_spec", _capture)
-    # note (lennox): a factory module that imports resolve_device_spec at module
+    monkeypatch.setattr(device_mod, "resolve_concrete_device", _capture)
+    # note (lennox): a factory module that imports resolve_concrete_device at module
     # scope (rather than inside the factory body) binds its own name to the
     # pre-patch function, so patching device_mod alone is invisible to it -- patch
     # the factory's own module too when it holds that name.
     if factory_path is not None:
         factory_module = importlib.import_module(factory_path.rsplit(".", 1)[0])
-        if "resolve_device_spec" in vars(factory_module):
-            monkeypatch.setattr(factory_module, "resolve_device_spec", _capture)
+        if "resolve_concrete_device" in vars(factory_module):
+            monkeypatch.setattr(factory_module, "resolve_concrete_device", _capture)
     # note (lennox): builders import lazily inside factory bodies, so patch each
     # known builder class directly; MRO bypasses a base-class-only patch.
     monkeypatch.setattr(
@@ -191,6 +198,17 @@ def test_gpu_stage_factories_forward_gpu_id_into_device_spec_resolution(
 
     monkeypatch.setenv("HF_HUB_OFFLINE", "1")
     monkeypatch.setenv("TRANSFORMERS_OFFLINE", "1")
+    if (model, stage.name) in _INLINE_DEVICE_VALIDATED:
+        try:
+            factory(model_path="unused", device="xpu", gpu_id=2)
+        except ValueError as exc:
+            assert "cuda or cpu" in str(exc)
+            return
+        except RuntimeError as exc:
+            if isinstance(exc.__cause__, ImportError):
+                pytest.skip(f"optional dependency missing inside factory body: {exc}")
+            raise
+        pytest.fail(f"{stage.factory_path} accepted a device it cannot serve")
     _arm_device_spec_resolvers(monkeypatch, factory_path=stage.factory_path)
     kwargs: dict[str, object] = {"device": None, "gpu_id": 2}
     if "model_path" in _factory_parameters(stage.factory_path):
@@ -220,7 +238,7 @@ def test_gpu_stage_factories_forward_gpu_id_into_device_spec_resolution(
     else:
         pytest.fail(
             f"{stage.factory_path} returned without ever consulting "
-            "resolve_device_spec; should not resolve device and "
+            "resolve_concrete_device; should not resolve device and "
             "gpu_id by hand (or ignore them)"
         )
 
@@ -468,7 +486,13 @@ def test_qwen3_omni_encoder_stages_resolve_none_to_the_platform(
 
     getattr(stages, f"create_{factory_name}_executor")("unused", device=None)
 
-    assert built["device"] == platforms.current_platform.device_type
+    import torch
+
+    built_device = torch.device(built["device"])
+    assert built_device.type == platforms.current_platform.device_type
+    if built_device.type != "cpu":
+        # Placement was not requested, so the backend's current card is bound.
+        assert built_device.index is not None
     assert built["enable_layer_cuda_graph"] is (
         False if factory_name == "audio_encoder" else None
     )
@@ -526,3 +550,143 @@ def test_qwen3_asr_stage_forwards_none_to_the_shared_builder(
     # Placement injects gpu_id only when the signature declares it. Without it the
     # builder resolved a bare accelerator and told SGLang card 0.
     assert seen["gpu_id"] == 1
+
+
+# note (lennox): qwen colocated speech shares in-process queues across its stages,
+# so its placement policy rejects process replicas by design.
+_REPLICA_REJECTED_TOPOLOGIES = {
+    ("qwen3_omni", "speech-colocated"),
+}
+
+
+def _config_with_one_replicated_process(config_cls, model):
+    from sglang_omni.config.schema import ProcessConfig
+    from sglang_omni.config.topology import stage_process_name
+
+    config = config_cls(model_path="unused")
+    by_process: dict[str, list] = {}
+    for stage in config.stages:
+        by_process.setdefault(stage_process_name(stage), []).append(stage)
+    candidates = []
+    for process_name, members in by_process.items():
+        gpu_members = [
+            stage
+            for stage in members
+            if stage.gpu is not None
+            and (model, stage.name) not in _CPU_ONLY_GPU_PLACED
+            and stage.tp_size == 1
+        ]
+        if gpu_members and all(stage.tp_size == 1 for stage in members):
+            candidates.append((process_name, gpu_members))
+    if not candidates:
+        return None, None
+    # A process with a single GPU stage needs no colocation memory budget; fall
+    # back to the fullest process and budget every member when none exists.
+    singles = [c for c in candidates if len(c[1]) == 1]
+    process_name, gpu_members = (
+        singles[0] if singles else max(candidates, key=lambda c: len(c[1]))
+    )
+    stages_cfg = list(config.stages)
+    if len(gpu_members) > 1:
+        member_names = {stage.name for stage in gpu_members}
+        stages_cfg = [
+            (
+                stage.model_copy(update={"gpu_memory_fraction": 0.3})
+                if stage.name in member_names
+                else stage
+            )
+            for stage in stages_cfg
+        ]
+    processes = dict(config.processes)
+    existing = processes.get(process_name)
+    replica_fields = {"num_replicas": 2, "replica_devices": [2, 3]}
+    processes[process_name] = (
+        existing.model_copy(update=replica_fields)
+        if existing is not None
+        else ProcessConfig(**replica_fields)
+    )
+    return (
+        config.model_copy(update={"stages": stages_cfg, "processes": processes}),
+        [stage.name for stage in gpu_members],
+    )
+
+
+@pytest.mark.parametrize(
+    "model,label",
+    sorted({(m, l) for m, l, _ in _iter_stages()}),
+    ids=lambda v: v if isinstance(v, str) else None,
+)
+def test_every_model_routes_each_process_replica_to_its_own_gpu(
+    monkeypatch, model, label
+):
+    """Replicating any model's GPU process must hand each replica its own card;
+    a factory that cannot take that gpu_id is exactly what disables replicas."""
+    from sglang_omni.config.runtime import (
+        apply_typed_stage_kwargs,
+        resolve_factory_signature_args,
+    )
+    from sglang_omni.pipeline import runtime_config
+    from sglang_omni.pipeline.mp_runner import _build_stage_groups
+    from sglang_omni.pipeline.runtime_config import prepare_pipeline_runtime
+    from tests.unit_test.fixtures.pipeline_fakes import FakeMpContext
+
+    module = importlib.import_module(f"sglang_omni.models.{model}.config")
+    topologies = {}
+    if getattr(module, "EntryClass", None) is not None:
+        topologies["default"] = module.EntryClass
+    topologies.update(getattr(module, "Variants", None) or {})
+    config, replicated_stages = _config_with_one_replicated_process(
+        topologies[label], model
+    )
+    if config is None:
+        pytest.skip("no tp_size=1 GPU process to replicate")
+
+    # note (lennox): the replica cards (2, 3) need not exist on this host; the
+    # test stops at the launch specs, before any process or device is touched.
+    monkeypatch.setattr(runtime_config, "_visible_device_count", lambda: None)
+    # note (lennox): the unix-socket path budget is 0 on Windows (no AF_UNIX),
+    # rejecting every config; the budget is unrelated to gpu routing.
+    monkeypatch.setattr(runtime_config, "_IPC_SUN_PATH_BUDGET", 10_000)
+
+    if (model, label) in _REPLICA_REJECTED_TOPOLOGIES:
+        with pytest.raises(ValueError, match="does not support process replicas"):
+            prepare_pipeline_runtime(config)
+        return
+
+    prep = prepare_pipeline_runtime(config)
+    try:
+        groups = _build_stage_groups(
+            config,
+            ctx=FakeMpContext(),
+            stages_cfg=prep.stages_cfg,
+            endpoints=prep.endpoints,
+            placement_plan=prep.placement_plan,
+            process_plan=prep.process_plan,
+            replica_topology=prep.replica_topology,
+        )
+    finally:
+        prep.runtime_dir.close()
+
+    specs = {spec.stage_name: spec for group in groups for spec in group.specs}
+    for replica_id, expected_gpu in ((0, 2), (1, 3)):
+        for stage_name in replicated_stages:
+            spec = specs[f"{stage_name}@r{replica_id}"]
+            assert spec.factory_arg_defaults["gpu_id"] == expected_gpu
+            try:
+                factory = import_string(spec.factory)
+            except ImportError as exc:
+                pytest.skip(f"optional dependency missing: {exc}")
+            factory_args = apply_typed_stage_kwargs(
+                factory,
+                spec.factory_kwargs,
+                spec.typed_kwargs,
+                stage_name=spec.stage_name,
+            )
+            factory_args = resolve_factory_signature_args(
+                factory,
+                factory_args,
+                defaults=spec.factory_arg_defaults,
+                require_gpu_id=spec.require_factory_gpu_id,
+                stage_name=spec.stage_name,
+            )
+            assert factory_args["gpu_id"] == expected_gpu

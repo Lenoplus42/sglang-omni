@@ -90,10 +90,10 @@ def create_speaker_encode_executor(
     **_: Any,
 ) -> SimpleScheduler:
     from sglang_omni.models.zonos2.components.speaker_encoder import SpeakerEncoder
-    from sglang_omni.utils.device import resolve_device_spec
+    from sglang_omni.utils.device import resolve_concrete_device
 
     encoder = SpeakerEncoder(
-        device=resolve_device_spec(device, gpu_id),
+        device=str(resolve_concrete_device(device, gpu_id)),
         cache_max_items=speaker_cache_max_items,
         compile_forward=spk_compile,
     )
@@ -127,9 +127,9 @@ def create_vocoder_executor(
         decode_batch,
         decode_to_pcm,
     )
-    from sglang_omni.utils.device import resolve_device_spec
+    from sglang_omni.utils.device import resolve_concrete_device
 
-    device = resolve_device_spec(device, gpu_id)
+    device = str(resolve_concrete_device(device, gpu_id))
 
     def _result_payload(
         payload: StagePayload, state: Zonos2State, pcm: Any

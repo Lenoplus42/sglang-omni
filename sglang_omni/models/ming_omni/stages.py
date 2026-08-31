@@ -219,9 +219,9 @@ def create_audio_encoder_executor(
 ):
     from sglang_omni.models.ming_omni.components.audio_encoder import MingAudioEncoder
     from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
-    from sglang_omni.utils.device import resolve_device_spec
+    from sglang_omni.utils.device import resolve_concrete_device
 
-    device = resolve_device_spec(device, gpu_id)
+    device = str(resolve_concrete_device(device, gpu_id))
     model = MingAudioEncoder(model_path=model_path, device=device, dtype=dtype)
 
     def _encode(payload: StagePayload) -> StagePayload:
@@ -256,9 +256,9 @@ def create_image_encoder_executor(
 ):
     from sglang_omni.models.ming_omni.components.image_encoder import MingImageEncoder
     from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
-    from sglang_omni.utils.device import resolve_device_spec
+    from sglang_omni.utils.device import resolve_concrete_device
 
-    device = resolve_device_spec(device, gpu_id)
+    device = str(resolve_concrete_device(device, gpu_id))
     model = MingImageEncoder(
         model_path=model_path,
         device=device,
@@ -348,9 +348,9 @@ def create_talker_executor(
     )
     from sglang_omni.models.weight_loader import resolve_model_path
     from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
-    from sglang_omni.utils.device import resolve_device_spec
+    from sglang_omni.utils.device import resolve_concrete_device
 
-    device = resolve_device_spec(device, gpu_id)
+    device = str(resolve_concrete_device(device, gpu_id))
     local_path = resolve_model_path(model_path)
     executor = MingTalkerExecutor(
         model_path=local_path,
@@ -390,9 +390,9 @@ def create_streaming_talker_executor(
         MingStreamingTalkerScheduler,
     )
     from sglang_omni.models.weight_loader import resolve_model_path
-    from sglang_omni.utils.device import resolve_device_spec
+    from sglang_omni.utils.device import resolve_concrete_device
 
-    device = resolve_device_spec(device, gpu_id)
+    device = str(resolve_concrete_device(device, gpu_id))
     local_path = resolve_model_path(model_path)
     return MingStreamingTalkerScheduler(
         model_path=local_path,

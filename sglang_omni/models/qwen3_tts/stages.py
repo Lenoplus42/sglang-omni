@@ -184,9 +184,9 @@ def create_vocoder_executor(
     enable_deterministic_inference: bool = False,
     followup_cuda_graph: bool = True,
 ) -> SimpleScheduler:
-    from sglang_omni.utils.device import resolve_device_spec
+    from sglang_omni.utils.device import resolve_concrete_device
 
-    device = resolve_device_spec(device, gpu_id)
+    device = str(resolve_concrete_device(device, gpu_id))
     tokenizer = _load_qwen3_tts_tokenizer(
         model_path,
         device=device,

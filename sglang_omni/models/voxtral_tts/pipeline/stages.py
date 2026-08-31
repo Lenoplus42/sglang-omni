@@ -399,9 +399,9 @@ def create_vocoder_executor(
     device: str | None = None,
     gpu_id: int | None = None,
 ) -> SimpleScheduler:
-    from sglang_omni.utils.device import resolve_device_spec
+    from sglang_omni.utils.device import resolve_concrete_device
 
-    device = resolve_device_spec(device, gpu_id)
+    device = str(resolve_concrete_device(device, gpu_id))
     checkpoint_dir = _resolve_checkpoint(model_path)
 
     logger.info("Loading Voxtral audio tokenizer for vocoding...")

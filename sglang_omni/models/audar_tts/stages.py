@@ -175,9 +175,9 @@ def create_reference_encoder_executor(
     cache_max_bytes: int = 64 * 1024 * 1024,
     max_concurrency: int = 8,
 ) -> SimpleScheduler:
-    from sglang_omni.utils.device import resolve_device_spec
+    from sglang_omni.utils.device import resolve_concrete_device
 
-    device = resolve_device_spec(device, gpu_id)
+    device = str(resolve_concrete_device(device, gpu_id))
     codec = _load_codec(codec_model, codec_revision, device)
     reference_service = ReferenceEncodeService(
         _AudarReferenceEncodeHook(
@@ -239,7 +239,12 @@ def create_tts_engine_executor(
             "Audar-TTS requires the 'audar-tts' optional dependencies"
         ) from exc
 
-    del device
+    # note (lennox): resolve_concrete_device would drop an explicit gpu_id when the
+    # host resolves to cpu; llama.cpp binds a bare index, so only the type is checked.
+    if device is not None and str(device).strip().lower() not in ("cpu", "cuda"):
+        raise ValueError(
+            f"Audar-TTS llama.cpp engine runs on cuda or cpu only; got device={device!r}"
+        )
     main_gpu = int(gpu_id) if gpu_id is not None else 0
     model_file = _resolve_gguf(model_path, gguf_filename, model_revision)
     llm = Llama(
@@ -312,9 +317,9 @@ def create_vocoder_executor(
     codec_model: str = DEFAULT_CODEC_MODEL,
     codec_revision: str = "main",
 ) -> SimpleScheduler:
-    from sglang_omni.utils.device import resolve_device_spec
+    from sglang_omni.utils.device import resolve_concrete_device
 
-    device = resolve_device_spec(device, gpu_id)
+    device = str(resolve_concrete_device(device, gpu_id))
     codec = _load_codec(codec_model, codec_revision, device)
     codec_lock = _codec_lock(codec_model, codec_revision, device)
 

@@ -90,13 +90,13 @@ def create_dit_dav_executor(
     cache_dit_residual_diff_threshold: float = 0.08,
     cache_dit_max_continuous_cached_steps: int = 1,
 ) -> MiniMaxMusic3AcousticScheduler:
-    from sglang_omni.utils.device import resolve_device_spec
+    from sglang_omni.utils.device import resolve_concrete_device
 
     if not (current_platform.is_cuda() or current_platform.is_musa()):
         raise RuntimeError(
             "MiniMax Music 3 acoustic inference requires CUDA/MUSA backend"
         )
-    device = resolve_device_spec(device, gpu_id)
+    device = str(resolve_concrete_device(device, gpu_id))
     decoder = MiniMaxMusic3AcousticDecoder(
         model_path,
         device=device,

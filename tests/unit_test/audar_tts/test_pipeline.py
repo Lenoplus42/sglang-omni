@@ -722,6 +722,20 @@ def test_codec_model_and_lock_are_shared_between_stages(
     assert loads == 1
 
 
+def test_llama_cpp_stage_rejects_a_device_it_cannot_serve(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """llama.cpp binds a bare main_gpu index; a non-cuda/cpu device intent would
+    be silently mapped onto the wrong backend's card numbering."""
+    monkeypatch.setitem(
+        sys.modules,
+        "llama_cpp",
+        types.SimpleNamespace(LLAMA_SPLIT_MODE_NONE=0, Llama=object),
+    )
+    with pytest.raises(ValueError, match="cuda or cpu"):
+        stages.create_tts_engine_executor("unused", device="xpu", gpu_id=1)
+
+
 def test_llama_cpp_stage_matches_official_generation_loop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

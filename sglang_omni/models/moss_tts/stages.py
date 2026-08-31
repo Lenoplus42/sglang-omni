@@ -442,9 +442,9 @@ def create_preprocessing_executor(
             "off",
             "",
         )
-    from sglang_omni.utils.device import resolve_device_spec
+    from sglang_omni.utils.device import resolve_concrete_device
 
-    device = resolve_device_spec(device, gpu_id)
+    device = str(resolve_concrete_device(device, gpu_id))
     processor = _load_moss_processor(model_path)
     resolved_codec_model_path = _resolve_audio_tokenizer_model_path(
         processor,
@@ -521,10 +521,10 @@ def create_vocoder_executor(
     compute_dtype: str | torch.dtype | None = "bfloat16",
     attention_backend: str = "auto",
 ) -> MossStreamingVocoderScheduler:
-    from sglang_omni.utils.device import resolve_device_spec
+    from sglang_omni.utils.device import resolve_concrete_device
 
     # note (lennox): device is the policy override; gpu_id is the placement fallback.
-    device = resolve_device_spec(device, gpu_id)
+    device = str(resolve_concrete_device(device, gpu_id))
     resolved_compute_dtype = _resolve_compute_dtype(compute_dtype)
     processor = _load_moss_processor(model_path)
     decoder_dtype = resolve_moss_audio_dtype(

@@ -109,9 +109,9 @@ def create_reference_encode_executor(
     ref_audio_cache_max_bytes: int = 64 * 1024 * 1024,
 ) -> SimpleScheduler:
     from sglang_omni.models.ming_tts.reference_encode import MingTTSReferenceEncoder
-    from sglang_omni.utils.device import resolve_device_spec
+    from sglang_omni.utils.device import resolve_concrete_device
 
-    device = resolve_device_spec(device, gpu_id)
+    device = str(resolve_concrete_device(device, gpu_id))
     checkpoint_dir = _resolve_checkpoint(model_path)
     config = _load_ming_tts_config(checkpoint_dir)
     context_length = int(context_length or _resolve_context_length(config))
@@ -172,9 +172,9 @@ def create_audio_decode_executor(
     from sglang_omni.models.ming_tts.streaming_vocoder import (
         MingTTSStreamingVocoderScheduler,
     )
-    from sglang_omni.utils.device import resolve_device_spec
+    from sglang_omni.utils.device import resolve_concrete_device
 
-    device = resolve_device_spec(device, gpu_id)
+    device = str(resolve_concrete_device(device, gpu_id))
     checkpoint_dir = _resolve_checkpoint(model_path)
     config = _load_ming_tts_config(checkpoint_dir)
 

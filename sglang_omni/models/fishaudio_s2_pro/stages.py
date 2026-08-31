@@ -344,9 +344,9 @@ def create_vocoder_executor(
     from sglang_omni.models.fishaudio_s2_pro.streaming_vocoder import (
         S2ProVocoderScheduler,
     )
-    from sglang_omni.utils.device import resolve_device_spec
+    from sglang_omni.utils.device import resolve_concrete_device
 
-    device = resolve_device_spec(device, gpu_id)
+    device = str(resolve_concrete_device(device, gpu_id))
     checkpoint_dir = _resolve_checkpoint(model_path)
     codec = _load_codec(checkpoint_dir, device)
 

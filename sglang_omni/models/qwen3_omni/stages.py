@@ -850,9 +850,9 @@ def create_image_encoder_executor(
     dtype: str | None = None,
 ):
     from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
-    from sglang_omni.utils.device import resolve_device_spec
+    from sglang_omni.utils.device import resolve_concrete_device
 
-    device = resolve_device_spec(device, gpu_id)
+    device = str(resolve_concrete_device(device, gpu_id))
     model = Qwen3OmniImageEncoder(model_path=model_path, device=device, dtype=dtype)
     cache = StageOutputCache(
         max_size=QWEN3_ENCODER_CACHE_MAX_ENTRIES,
@@ -926,9 +926,9 @@ def create_audio_encoder_executor(
     enable_layer_cuda_graph: bool = False,
 ):
     from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
-    from sglang_omni.utils.device import resolve_device_spec
+    from sglang_omni.utils.device import resolve_concrete_device
 
-    device = resolve_device_spec(device, gpu_id)
+    device = str(resolve_concrete_device(device, gpu_id))
     model = Qwen3OmniAudioEncoder(
         model_path=model_path,
         device=device,
