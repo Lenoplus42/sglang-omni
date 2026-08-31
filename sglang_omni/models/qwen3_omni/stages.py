@@ -1024,9 +1024,11 @@ def create_sglang_thinker_executor_from_config(
     prefill_coalesce_when_idle: bool = False,
 ):
     """Returns OmniScheduler for thinker."""
+    from sglang_omni.scheduling.sglang_backend import pin_resolved_device_type
     from sglang_omni.utils.device import resolve_concrete_device
 
-    gpu_id = resolve_concrete_device(device, gpu_id).index or 0
+    concrete_device = resolve_concrete_device(device, gpu_id)
+    gpu_id = concrete_device.index or 0
     # note (luojiaxuan):
     # The thinker runs prefill XOR decode per scheduler step, so under
     # concurrent streaming a large fraction of steps are prefill-only while
@@ -1064,6 +1066,7 @@ def create_sglang_thinker_executor_from_config(
         total_gpu_memory_fraction=total_gpu_memory_fraction,
         encoder_mem_reserve=colocated_encoder_mem_reserve,
     )
+    pin_resolved_device_type(overrides, concrete_device.type)
     server_args = build_sglang_server_args(
         model_path,
         context_length=max_seq_len,
@@ -1152,9 +1155,11 @@ def create_talker_ar_executor_from_config(
 ):
     """Returns OmniScheduler for talker."""
     from sglang_omni.models.qwen3_omni.bootstrap import create_talker_scheduler
+    from sglang_omni.scheduling.sglang_backend import pin_resolved_device_type
     from sglang_omni.utils.device import resolve_concrete_device
 
-    gpu_id = resolve_concrete_device(device, gpu_id).index or 0
+    concrete_device = resolve_concrete_device(device, gpu_id)
+    gpu_id = concrete_device.index or 0
 
     # Note (Xuesong, Chenyang): cuda_graph defaults to ON for the talker
     # after #384, which routed talker MoE through `self.experts` (FusedMoE)
@@ -1176,6 +1181,7 @@ def create_talker_ar_executor_from_config(
         stage_name="talker_ar",
         total_gpu_memory_fraction=total_gpu_memory_fraction,
     )
+    pin_resolved_device_type(overrides, concrete_device.type)
     server_args = build_sglang_server_args(
         model_path,
         context_length=max_seq_len,

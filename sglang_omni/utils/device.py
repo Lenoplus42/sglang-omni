@@ -35,16 +35,6 @@ def resolve_device_spec(device: str | None, index: int | None = None) -> str:
     return _with_index(dev_type, raw_index, index)
 
 
-def place_device_spec(device: str, index: int | None = None) -> str:
-    """Apply a placement index to an explicit device spec, keeping its own type.
-
-    The caller named the platform, so honor it rather than validate it: a CUDA-only
-    stage keeps CUDA on any host, and an explicit xpu or cpu is never rewritten.
-    """
-    dev_type, _, raw_index = str(device).strip().partition(":")
-    return _with_index(dev_type.lower(), raw_index, index)
-
-
 def resolve_concrete_device(
     device: str | None, index: int | None = None
 ) -> "torch.device":
@@ -58,12 +48,7 @@ def resolve_concrete_device(
 
     from sglang_omni.platforms import current_platform
 
-    spec = (
-        resolve_device_spec(device, index)
-        if device is None
-        else place_device_spec(device, index)
-    )
-    concrete = torch.device(spec)
+    concrete = torch.device(resolve_device_spec(device, index))
     if concrete.type != "cpu" and concrete.index is None:
         concrete = current_platform.get_device(
             torch.get_device_module().current_device()
@@ -71,4 +56,4 @@ def resolve_concrete_device(
     return concrete
 
 
-__all__ = ["place_device_spec", "resolve_concrete_device", "resolve_device_spec"]
+__all__ = ["resolve_concrete_device", "resolve_device_spec"]

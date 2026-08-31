@@ -303,17 +303,22 @@ def create_sglang_thinker_executor_from_config(
 
     from sglang_omni.models.ming_omni.bootstrap import create_thinker_scheduler
     from sglang_omni.models.ming_omni.registration import register_ming_hf_config
-    from sglang_omni.scheduling.sglang_backend import build_sglang_server_args
+    from sglang_omni.scheduling.sglang_backend import (
+        build_sglang_server_args,
+        pin_resolved_device_type,
+    )
     from sglang_omni.utils.device import resolve_concrete_device
 
     register_ming_hf_config()
 
-    gpu_id = resolve_concrete_device(device, gpu_id).index or 0
+    concrete_device = resolve_concrete_device(device, gpu_id)
+    gpu_id = concrete_device.index or 0
 
     overrides = dict(server_args_overrides or {})
     overrides.setdefault("sampling_backend", "pytorch")
     overrides.setdefault("trust_remote_code", False)
     overrides["tp_size"] = tp_size
+    pin_resolved_device_type(overrides, concrete_device.type)
     server_args = build_sglang_server_args(
         model_path,
         context_length=thinker_max_seq_len,

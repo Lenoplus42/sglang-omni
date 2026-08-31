@@ -46,10 +46,6 @@ def test_a_device_string_naming_its_own_index_is_rejected():
         dev.resolve_device_spec("cpu:1")
     with pytest.raises(ValueError, match="names an index"):
         dev.resolve_device_spec("cpu:0", 5)
-    with pytest.raises(ValueError, match="names an index"):
-        dev.place_device_spec("cpu:1")
-    with pytest.raises(ValueError, match="names an index"):
-        dev.place_device_spec("cpu:0", 5)
 
 
 def test_a_device_this_host_cannot_serve_is_rejected_not_retargeted():
@@ -99,17 +95,11 @@ def test_sglang_caps_xpu_free_memory_against_the_allocator(monkeypatch) -> None:
     assert free_gb == (total_bytes - allocated_bytes) / (1 << 30)
 
 
-def test_an_explicit_device_keeps_its_platform_and_takes_the_placement_index():
-    assert dev.place_device_spec("xpu", 1) == "xpu:1"
-    assert dev.place_device_spec("cuda", 1) == "cuda:1"
-    assert dev.place_device_spec("cpu", 1) == "cpu"
-    assert dev.place_device_spec("cuda") == "cuda"
-    assert dev.place_device_spec("xpu") == "xpu"
+def test_an_explicit_device_is_validated_on_the_concrete_path_too():
+    """An explicit device must fail at this boundary, not deep inside the engine."""
+    import pytest
 
-
-def test_placing_an_explicit_device_does_not_validate_against_the_platform():
     live = current_platform.device_type
     absent = "xpu" if live == "cuda" else "cuda"
-
-    assert dev.place_device_spec(absent) == absent
-    assert dev.place_device_spec(absent, 1) == f"{absent}:1"
+    with pytest.raises(ValueError, match="this host resolved to"):
+        dev.resolve_concrete_device(absent, 1)

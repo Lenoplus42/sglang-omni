@@ -155,16 +155,14 @@ def _arm_device_spec_resolvers(monkeypatch, factory_path: str | None = None):
         raise _Settled(device, index)
 
     monkeypatch.setattr(device_mod, "resolve_device_spec", _capture)
-    monkeypatch.setattr(device_mod, "place_device_spec", _capture)
-    # note (lennox): a factory module that imports resolve_device_spec/place_device_spec
-    # at module scope (rather than inside the factory body) binds its own name to the
-    # pre-patch function, so patching device_mod alone is invisible to it -- patch the
-    # factory's own module too when it holds that name.
+    # note (lennox): a factory module that imports resolve_device_spec at module
+    # scope (rather than inside the factory body) binds its own name to the
+    # pre-patch function, so patching device_mod alone is invisible to it -- patch
+    # the factory's own module too when it holds that name.
     if factory_path is not None:
         factory_module = importlib.import_module(factory_path.rsplit(".", 1)[0])
-        for name in ("resolve_device_spec", "place_device_spec"):
-            if name in vars(factory_module):
-                monkeypatch.setattr(factory_module, name, _capture)
+        if "resolve_device_spec" in vars(factory_module):
+            monkeypatch.setattr(factory_module, "resolve_device_spec", _capture)
     # note (lennox): builders import lazily inside factory bodies, so patch each
     # known builder class directly; MRO bypasses a base-class-only patch.
     monkeypatch.setattr(
@@ -222,7 +220,7 @@ def test_gpu_stage_factories_forward_gpu_id_into_device_spec_resolution(
     else:
         pytest.fail(
             f"{stage.factory_path} returned without ever consulting "
-            "resolve_device_spec/place_device_spec; should not resolve device and "
+            "resolve_device_spec; should not resolve device and "
             "gpu_id by hand (or ignore them)"
         )
 
@@ -371,6 +369,63 @@ def test_engine_factories_bind_the_placed_gpu(monkeypatch, model):
     with pytest.raises(_Stop):
         factory(model_path="unused", device="cuda", gpu_id=2)
     assert final == {"device": "cuda:2", "gpu_id": 2}
+
+
+# note (lennox): these AR factories build ServerArgs themselves instead of going
+# through SGLangGenerationEngineBuilder.build(), so the builder-level test above
+# cannot see whether they pin the resolved device type into ServerArgs.
+_SELF_BUILT_SERVER_ARGS_FACTORIES = [
+    "sglang_omni.models.llada2_uni.stages.create_sglang_dllm_thinker_executor_from_config",
+    "sglang_omni.models.ming_omni.stages.create_sglang_thinker_executor_from_config",
+    "sglang_omni.models.qwen3_omni.stages.create_sglang_thinker_executor_from_config",
+    "sglang_omni.models.qwen3_omni.stages.create_talker_ar_executor_from_config",
+]
+
+
+@pytest.mark.parametrize(
+    "factory_path",
+    [
+        pytest.param(p, id=p.split(".")[2] + "-" + p.rsplit(".", 1)[-1])
+        for p in _SELF_BUILT_SERVER_ARGS_FACTORIES
+    ],
+)
+def test_self_built_server_args_carry_the_resolved_device_type(
+    monkeypatch, factory_path
+):
+    try:
+        factory = import_string(factory_path)
+    except ImportError as exc:
+        pytest.skip(f"optional dependency missing: {exc}")
+
+    from sglang_omni.scheduling import sglang_backend
+
+    captured: dict[str, object] = {}
+
+    class _Stop(Exception):
+        pass
+
+    def fake_build(model_path, **kwargs):
+        del model_path
+        captured.update(kwargs)
+        raise _Stop
+
+    monkeypatch.setattr(sglang_backend, "build_sglang_server_args", fake_build)
+    factory_module = importlib.import_module(factory_path.rsplit(".", 1)[0])
+    if "build_sglang_server_args" in vars(factory_module):
+        monkeypatch.setattr(factory_module, "build_sglang_server_args", fake_build)
+    # note (lennox): pinned to "cuda" so the assertion below is host-independent.
+    monkeypatch.setattr(
+        platforms.current_platform, "device_type", "cuda", raising=False
+    )
+
+    with pytest.raises(_Stop):
+        factory("unused", device=None, gpu_id=2)
+    assert captured["device"] == "cuda"
+
+    with pytest.raises(ValueError, match="stage placement"):
+        factory(
+            "unused", device=None, gpu_id=2, server_args_overrides={"device": "xpu"}
+        )
 
 
 _MODELS = sorted(p.parent.name for p in _MODELS_DIR.glob("*/config.py"))

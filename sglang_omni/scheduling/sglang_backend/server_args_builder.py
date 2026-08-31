@@ -35,6 +35,18 @@ def _normalize_decode_cuda_graph_overrides(kwargs: dict[str, Any]) -> None:
         kwargs[decode_name] = legacy_value
 
 
+def pin_resolved_device_type(overrides: dict[str, Any], resolved_type: str) -> None:
+    """Write the placement-resolved device type into ServerArgs overrides."""
+    requested_type = overrides.get("device")
+    if requested_type is not None and requested_type != resolved_type:
+        raise ValueError(
+            f"server_args_overrides set device={requested_type!r}, but stage placement "
+            f"resolved to {resolved_type!r}. Drop the "
+            f"override or set device={resolved_type!r}."
+        )
+    overrides["device"] = resolved_type
+
+
 def build_sglang_server_args(
     model_path: str,
     context_length: int,

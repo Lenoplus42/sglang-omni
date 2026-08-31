@@ -391,10 +391,13 @@ def test_qwen_talker_ar_threads_explicit_generation_batch_policy(monkeypatch) ->
 
     qwen_stages.create_talker_ar_executor_from_config("dummy")
 
+    from sglang_omni.platforms import current_platform
+
     assert build_calls == [
         {
             "cuda_graph_bs": [1, 2, 4, 8, 12, 16, 24, 32],
             "cuda_graph_max_bs": 32,
+            "device": current_platform.device_type,
             "disable_cuda_graph": False,
             "max_running_requests": 32,
             "sampling_backend": "pytorch",

@@ -94,10 +94,14 @@ def create_sglang_dllm_thinker_executor_from_config(
 ):
     """Create an DllmScheduler for the LLaDA2-Uni thinker."""
     from sglang_omni.models.llada2_uni.bootstrap import create_dllm_thinker_scheduler
-    from sglang_omni.scheduling.sglang_backend import build_sglang_server_args
+    from sglang_omni.scheduling.sglang_backend import (
+        build_sglang_server_args,
+        pin_resolved_device_type,
+    )
     from sglang_omni.utils.device import resolve_concrete_device
 
-    resolved_gpu_id = resolve_concrete_device(device, gpu_id).index or 0
+    concrete_device = resolve_concrete_device(device, gpu_id)
+    resolved_gpu_id = concrete_device.index or 0
 
     overrides: dict[str, Any] = {
         "attention_backend": "flashinfer",
@@ -105,6 +109,7 @@ def create_sglang_dllm_thinker_executor_from_config(
         "sampling_backend": "pytorch",
     }
     overrides.update(server_args_overrides or {})
+    pin_resolved_device_type(overrides, concrete_device.type)
 
     server_args = build_sglang_server_args(
         model_path,
