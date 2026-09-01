@@ -86,10 +86,11 @@ _REQUIRES_REAL_ACCELERATOR = {
 }
 
 
-# note (lennox): llama.cpp manages CUDA itself and binds a bare main_gpu index, so
-# this factory checks device type inline; resolving would drop gpu_id on cpu hosts.
+# note (lennox): factories that validate their device inline instead of calling
+# resolve_concrete_device; each maps to (probe kwargs, expected ValueError fragment).
 _INLINE_DEVICE_VALIDATED = {
-    ("audar_tts", "tts_engine"),
+    ("audar_tts", "tts_engine"): ({"device": "xpu", "gpu_id": 2}, "cuda or cpu"),
+    ("ming_tts", "audio_decode"): ({"device": "xpu"}, "CUDA"),
 }
 
 
@@ -199,10 +200,11 @@ def test_gpu_stage_factories_forward_gpu_id_into_device_spec_resolution(
     monkeypatch.setenv("HF_HUB_OFFLINE", "1")
     monkeypatch.setenv("TRANSFORMERS_OFFLINE", "1")
     if (model, stage.name) in _INLINE_DEVICE_VALIDATED:
+        probe_kwargs, expected = _INLINE_DEVICE_VALIDATED[(model, stage.name)]
         try:
-            factory(model_path="unused", device="xpu", gpu_id=2)
+            factory(model_path="unused", **probe_kwargs)
         except ValueError as exc:
-            assert "cuda or cpu" in str(exc)
+            assert expected in str(exc)
             return
         except RuntimeError as exc:
             if isinstance(exc.__cause__, ImportError):
