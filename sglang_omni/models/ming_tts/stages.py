@@ -289,28 +289,18 @@ def create_audio_decode_executor(
             raise TypeError("Ming-Omni-TTS gpu_id must be an integer")
         if gpu_id < 0:
             raise ValueError("Ming-Omni-TTS gpu_id must be non-negative")
-        resolved_device = torch.device("cuda", gpu_id)
-    else:
-        try:
-            # note (lennox): the factory contract defaults device to None; this
-            # stage is CUDA-only, so an unset device means cuda.
-            resolved_device = torch.device(device if device is not None else "cuda")
-        except (TypeError, RuntimeError) as exc:
-            raise ValueError(
-                f"Invalid Ming-Omni-TTS audio decode device: {device!r}"
-            ) from exc
+    from sglang_omni.utils.device import resolve_concrete_device
+
+    resolved_device = resolve_concrete_device(device, gpu_id)
     if resolved_device.type != "cuda" or not torch.cuda.is_available():
         raise ValueError(
             "Ming-Omni-TTS fixed AudioVAE serving requires an available CUDA device"
         )
     logical_gpu_id = resolved_device.index
-    if logical_gpu_id is None:
-        logical_gpu_id = torch.cuda.current_device()
-    if logical_gpu_id < 0 or logical_gpu_id >= torch.cuda.device_count():
+    if logical_gpu_id >= torch.cuda.device_count():
         raise ValueError(
             f"Ming-Omni-TTS audio decode GPU {logical_gpu_id} is not visible"
         )
-    resolved_device = torch.device("cuda", logical_gpu_id)
 
     resolved_dtype = _resolve_audio_vae_dtype(dtype)
     if resolved_dtype != torch.bfloat16:

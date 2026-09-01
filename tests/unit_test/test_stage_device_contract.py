@@ -90,7 +90,6 @@ _REQUIRES_REAL_ACCELERATOR = {
 # resolve_concrete_device; each maps to (probe kwargs, expected ValueError fragment).
 _INLINE_DEVICE_VALIDATED = {
     ("audar_tts", "tts_engine"): ({"device": "xpu", "gpu_id": 2}, "cuda or cpu"),
-    ("ming_tts", "audio_decode"): ({"device": "xpu"}, "CUDA"),
 }
 
 

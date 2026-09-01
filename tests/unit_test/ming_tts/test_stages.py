@@ -122,6 +122,11 @@ def _patch_audio_decode_factory_dependencies(
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
     monkeypatch.setattr(torch.cuda, "current_device", lambda: 0)
+    # note (lennox): the factory resolves device through the platform layer now,
+    # which CI's hidden-CUDA job would report as cpu; pin it like torch.cuda above.
+    from sglang_omni.platforms import current_platform
+
+    monkeypatch.setattr(current_platform, "device_type", "cuda", raising=False)
     monkeypatch.setattr(stages, "_resolve_checkpoint", lambda _: "checkpoint")
     monkeypatch.setattr(
         stages,
