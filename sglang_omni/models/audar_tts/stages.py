@@ -239,13 +239,15 @@ def create_tts_engine_executor(
             "Audar-TTS requires the 'audar-tts' optional dependencies"
         ) from exc
 
-    # note (lennox): resolve_concrete_device would drop an explicit gpu_id when the
-    # host resolves to cpu; llama.cpp binds a bare index, so only the type is checked.
-    if device is not None and str(device).strip().lower() not in ("cpu", "cuda"):
+    from sglang_omni.utils.device import resolve_concrete_device
+
+    concrete_device = resolve_concrete_device(device, gpu_id)
+    if concrete_device.type not in ("cpu", "cuda"):
         raise ValueError(
-            f"Audar-TTS llama.cpp engine runs on cuda or cpu only; got device={device!r}"
+            "Audar-TTS llama.cpp engine runs on cuda or cpu only; resolved "
+            f"device={concrete_device}"
         )
-    main_gpu = int(gpu_id) if gpu_id is not None else 0
+    main_gpu = concrete_device.index if concrete_device.type == "cuda" else 0
     model_file = _resolve_gguf(model_path, gguf_filename, model_revision)
     llm = Llama(
         model_path=model_file,

@@ -86,13 +86,6 @@ _REQUIRES_REAL_ACCELERATOR = {
 }
 
 
-# note (lennox): factories that validate their device inline instead of calling
-# resolve_concrete_device; each maps to (probe kwargs, expected ValueError fragment).
-_INLINE_DEVICE_VALIDATED = {
-    ("audar_tts", "tts_engine"): ({"device": "xpu", "gpu_id": 2}, "cuda or cpu"),
-}
-
-
 def _gpu_stage_ids(*, mark_accelerator=False):
     ids = []
     for model, label, stage in _iter_stages():
@@ -198,18 +191,6 @@ def test_gpu_stage_factories_forward_gpu_id_into_device_spec_resolution(
 
     monkeypatch.setenv("HF_HUB_OFFLINE", "1")
     monkeypatch.setenv("TRANSFORMERS_OFFLINE", "1")
-    if (model, stage.name) in _INLINE_DEVICE_VALIDATED:
-        probe_kwargs, expected = _INLINE_DEVICE_VALIDATED[(model, stage.name)]
-        try:
-            factory(model_path="unused", **probe_kwargs)
-        except ValueError as exc:
-            assert expected in str(exc)
-            return
-        except RuntimeError as exc:
-            if isinstance(exc.__cause__, ImportError):
-                pytest.skip(f"optional dependency missing inside factory body: {exc}")
-            raise
-        pytest.fail(f"{stage.factory_path} accepted a device it cannot serve")
     _arm_device_spec_resolvers(monkeypatch, factory_path=stage.factory_path)
     kwargs: dict[str, object] = {"device": None, "gpu_id": 2}
     if "model_path" in _factory_parameters(stage.factory_path):
