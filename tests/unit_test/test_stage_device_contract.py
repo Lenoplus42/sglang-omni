@@ -554,8 +554,8 @@ def test_qwen3_asr_stage_forwards_none_to_the_shared_builder(
     assert seen["gpu_id"] == 1
 
 
-# note (lennox): qwen colocated speech shares in-process queues across its stages,
-# so its placement policy rejects process replicas by design.
+# note (lennox): this topology's own placement policy rejects process replicas
+# (models/qwen3_omni/placement.py); the sweep asserts the rejection stays intact.
 _REPLICA_REJECTED_TOPOLOGIES = {
     ("qwen3_omni", "speech-colocated"),
 }
