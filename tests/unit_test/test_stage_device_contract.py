@@ -555,7 +555,7 @@ def test_qwen3_asr_stage_forwards_none_to_the_shared_builder(
 
 
 # note (lennox): this topology's own placement policy rejects process replicas
-# (models/qwen3_omni/placement.py); the sweep asserts the rejection stays intact.
+# (models/qwen3_omni/placement.py).
 _REPLICA_REJECTED_TOPOLOGIES = {
     ("qwen3_omni", "speech-colocated"),
 }
@@ -646,8 +646,7 @@ def test_every_model_routes_each_process_replica_to_its_own_gpu(
     # note (lennox): the replica cards (2, 3) need not exist on this host; the
     # test stops at the launch specs, before any process or device is touched.
     monkeypatch.setattr(runtime_config, "_visible_device_count", lambda: None)
-    # note (lennox): the unix-socket path budget is 0 on Windows (no AF_UNIX),
-    # rejecting every config; the budget is unrelated to gpu routing.
+    # note (lennox): budget here is unrelated to gpu routing, set it only for local test run on Windows.
     monkeypatch.setattr(runtime_config, "_IPC_SUN_PATH_BUDGET", 10_000)
 
     if (model, label) in _REPLICA_REJECTED_TOPOLOGIES:
