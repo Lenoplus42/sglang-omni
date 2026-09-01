@@ -50,8 +50,10 @@ def resolve_concrete_device(
 
     concrete = torch.device(resolve_device_spec(device, index))
     if concrete.type != "cpu" and concrete.index is None:
-        concrete = current_platform.get_device(
-            torch.get_device_module().current_device()
+        # note (lennox): normalized because platform get_device fakes in tests
+        # return plain strings; a str would make .index yield a bound method.
+        concrete = torch.device(
+            current_platform.get_device(torch.get_device_module().current_device())
         )
     return concrete
 
