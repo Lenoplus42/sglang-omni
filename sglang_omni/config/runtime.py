@@ -80,6 +80,13 @@ def resolve_stage_typed_kwargs(stage_cfg: StageConfig) -> dict[str, Any]:
         if value is not None:
             out[name] = value
     out.update(group.model_extra or {})
+    reserved = _PLACEMENT_OWNED_KWARGS & out.keys()
+    if reserved:
+        raise ValueError(
+            f"stage {stage_cfg.name!r} sets {sorted(reserved)} under factory.*; "
+            "these kwargs are owned by placement and are injected from "
+            "stage.gpu and stage.gpu_memory_fraction"
+        )
     if stage_cfg.engine is not None:
         server_args_overrides = stage_cfg.engine.overrides()
         if server_args_overrides:

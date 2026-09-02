@@ -86,10 +86,12 @@ _REQUIRES_REAL_ACCELERATOR = {
 }
 
 
-def _gpu_stage_ids(*, mark_accelerator=False):
+def _gpu_stage_ids(*, mark_accelerator=False, include_exempt=False):
     ids = []
     for model, label, stage in _iter_stages():
-        if stage.gpu is None or (model, stage.name) in _CPU_ONLY_GPU_PLACED:
+        if stage.gpu is None:
+            continue
+        if not include_exempt and (model, stage.name) in _CPU_ONLY_GPU_PLACED:
             continue
         marks = (
             [pytest.mark.accelerator]
@@ -104,7 +106,9 @@ def _gpu_stage_ids(*, mark_accelerator=False):
     return ids
 
 
-@pytest.mark.parametrize("model,label,stage", _gpu_stage_ids())
+# note (lennox): exempt colocation-only stages still take the parameters --
+# the launch-time gate injects gpu_id into every GPU-placed stage's factory.
+@pytest.mark.parametrize("model,label,stage", _gpu_stage_ids(include_exempt=True))
 def test_gpu_stage_factories_declare_device_and_gpu_id(model, label, stage):
     params = _factory_parameters(stage.factory_path)
     assert "gpu_id" in params, (

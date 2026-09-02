@@ -56,10 +56,15 @@ def _default_quality_list() -> list[int | None]:
 def create_preprocessing_executor(
     model_path: str,
     *,
+    device: str | None = None,
+    gpu_id: int | None = None,
     max_concurrency: int = 16,
     tts_norm: bool = True,
     tts_norm_cache_dir: str | None = None,
 ) -> SimpleScheduler:
+    # note (lennox): CPU-only stage declaring gpu only to share the pipeline
+    # process; it does not touch the device.
+    del device, gpu_id
     configure_tts_norm_cache_root(tts_norm_cache_dir)
 
     def _preprocess(payload: StagePayload) -> StagePayload:

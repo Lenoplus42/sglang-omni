@@ -100,15 +100,6 @@ class HiggsTtsPipelineConfig(PipelineConfig):
                 for key in self._STREAM_CADENCE_KEYS
                 if key in vocoder_extra
             }
-        if stage_name == "vocoder":
-            return {
-                "compile_decode": False,
-                # Before the steady cursor is established, a decode window is
-                # bounded by the default 75-row stride plus its 75-row
-                # follow-up. Capture that complete finite domain so terminal
-                # flushes cannot silently fall back to eager execution.
-                "decode_cuda_graph_frame_counts": tuple(range(1, 151)),
-            }
         return {}
 
     def model_post_init(self, __context: Any = None) -> None:

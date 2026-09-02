@@ -173,6 +173,16 @@ def test_scheduler_keys_pass_under_their_own_names() -> None:
     assert args["encoder_mem_reserve"] == 0.1
 
 
+def test_factory_group_rejects_placement_owned_kwargs() -> None:
+    """A config author writing factory.gpu_id would silently override the
+    planner's placement; the typed path must reject it like the hook path does."""
+    stage = _stage(factory={"gpu_id": 4})
+    config = PipelineConfig(model_path="dummy-model", stages=[stage])
+
+    with pytest.raises(ValueError, match="owned by placement"):
+        resolve_stage_factory_args(stage, config, gpu_id=2)
+
+
 def test_rank_gpu_id_can_be_supplied_by_launch_planner() -> None:
     stage = _stage(gpu=0)
     config = PipelineConfig(model_path="dummy-model", stages=[stage])
