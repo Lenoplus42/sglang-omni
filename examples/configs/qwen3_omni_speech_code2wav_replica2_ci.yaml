@@ -18,8 +18,6 @@ stages:
     gpu_memory_fraction: 0.02
   audio_encoder:
     gpu_memory_fraction: 0.02
-  mm_aggregate:
-    gpu_memory_fraction: 0.02
   thinker:
     gpu_memory_fraction: 0.78
   talker_ar:
