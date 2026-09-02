@@ -566,7 +566,10 @@ def test_voxtral_generation_reenables_cuda_graph_after_bootstrap(
         lambda **kwargs: SimpleNamespace(**kwargs),
     )
 
-    scheduler = stages.create_generation_executor("model", device="cuda")
+    from sglang_omni.platforms import current_platform
+
+    monkeypatch.setattr(current_platform, "device_type", "cuda", raising=False)
+    scheduler = stages.create_generation_executor("model", device="cuda", gpu_id=0)
 
     assert build_kwargs["disable_cuda_graph"] is False
     assert build_kwargs["cuda_graph_bs"] == [1, 2, 4, 8, 12, 16]

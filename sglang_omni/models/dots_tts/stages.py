@@ -372,11 +372,10 @@ def create_reference_encode_executor(
 ) -> SimpleScheduler:
     from sglang_omni.utils.device import resolve_concrete_device
 
-    if not torch.cuda.is_available():
+    concrete_device = resolve_concrete_device(device, gpu_id)
+    if concrete_device.type == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("dots.tts requires CUDA")
-    codec = load_dots_audio_codec(
-        model_path, device=str(resolve_concrete_device(device, gpu_id))
-    )
+    codec = load_dots_audio_codec(model_path, device=str(concrete_device))
     encoder = DotsReferenceEncoder(
         codec,
         model_id=str(model_path),

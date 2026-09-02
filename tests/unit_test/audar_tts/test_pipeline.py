@@ -722,6 +722,35 @@ def test_codec_model_and_lock_are_shared_between_stages(
     assert loads == 1
 
 
+def test_llama_cpp_stage_keeps_a_cpu_resolution_off_the_gpu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """n_gpu_layers defaults to -1 (offload everything); a cpu resolution must
+    zero it or the stage silently runs on GPU 0 anyway."""
+    captured: dict[str, object] = {}
+
+    class FakeLlama:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            raise RuntimeError("stop after capture")
+
+    from sglang_omni.platforms import current_platform
+
+    monkeypatch.setitem(
+        sys.modules,
+        "llama_cpp",
+        types.SimpleNamespace(LLAMA_SPLIT_MODE_NONE=0, Llama=FakeLlama),
+    )
+    monkeypatch.setattr(stages, "_resolve_gguf", lambda *args: "/model.gguf")
+    monkeypatch.setattr(current_platform, "device_type", "cpu", raising=False)
+
+    with pytest.raises(RuntimeError, match="stop after capture"):
+        stages.create_tts_engine_executor("unused", device="cpu")
+
+    assert captured["n_gpu_layers"] == 0
+    assert captured["main_gpu"] == 0
+
+
 def test_llama_cpp_stage_rejects_a_device_it_cannot_serve(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

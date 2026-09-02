@@ -248,6 +248,10 @@ def create_tts_engine_executor(
             f"device={concrete_device}"
         )
     main_gpu = concrete_device.index if concrete_device.type == "cuda" else 0
+    if concrete_device.type == "cpu":
+        # note (lennox): the n_gpu_layers default of -1 offloads every layer, so
+        # a cpu resolution would still run on GPU 0 without this.
+        n_gpu_layers = 0
     model_file = _resolve_gguf(model_path, gguf_filename, model_revision)
     llm = Llama(
         model_path=model_file,
