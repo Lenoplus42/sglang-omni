@@ -70,6 +70,7 @@ class SGLangGenerationEngineBuilder(ABC):
         dtype: str = "bfloat16",
         server_args_overrides: dict[str, Any] | None = None,
     ) -> Any:
+        from sglang_omni.platforms import current_platform
         from sglang_omni.scheduling import bootstrap as scheduling_bootstrap
         from sglang_omni.scheduling import sglang_backend
         from sglang_omni.utils.device import resolve_concrete_device
@@ -84,6 +85,12 @@ class SGLangGenerationEngineBuilder(ABC):
         self.dtype = dtype
 
         self.pre_infra_setup(checkpoint_dir)
+
+        if current_platform.is_cpu():
+            # A stage default asking for a graph would otherwise fail inside
+            # capture rather than at configuration time.
+            server_args_overrides = dict(server_args_overrides or {})
+            server_args_overrides["disable_cuda_graph"] = True
 
         requested_context_length = (
             server_args_overrides.get("context_length")
