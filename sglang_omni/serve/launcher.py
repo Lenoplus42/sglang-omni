@@ -434,6 +434,7 @@ async def _run_server(
                 pipeline_config.speech_reference_text_excludes_instructions
             ),
             additional_speech_languages=pipeline_config.additional_speech_languages,
+            max_speech_input_chars=pipeline_config.max_speech_input_chars,
             enable_realtime=enable_realtime,
             supports_realtime_audio_output=(
                 type(pipeline_config).code2wav_stage() is not None
@@ -442,7 +443,7 @@ async def _run_server(
             allowed_media_domains=allowed_media_domains,
             tts_batch_max_items=tts_batch_max_items,
             architectures=[pipeline_config.architecture],
-            audio_chunking=pipeline_config.audio_chunking,
+            audio_chunking=pipeline_config.resolved_audio_chunking,
         )
         profiler_dir = os.environ.get("SGLANG_TORCH_PROFILER_DIR")
         profiler_ctl = ProfilerControlClient(mp_runner.stage_control_endpoints)
