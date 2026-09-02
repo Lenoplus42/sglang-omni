@@ -46,14 +46,13 @@ def resolve_concrete_device(
     """
     import torch
 
-    from sglang_omni.platforms import current_platform
-
     concrete = torch.device(resolve_device_spec(device, index))
     if concrete.type != "cpu" and concrete.index is None:
-        # note (lennox): normalized because platform get_device fakes in tests
-        # return plain strings; a str would make .index yield a bound method.
+        # note (lennox): built from the resolved type directly -- the platform
+        # object's get_device is NotImplemented on cpu-only hosts even when a
+        # test legitimately pins device_type.
         concrete = torch.device(
-            current_platform.get_device(torch.get_device_module().current_device())
+            concrete.type, torch.get_device_module(concrete).current_device()
         )
     return concrete
 
