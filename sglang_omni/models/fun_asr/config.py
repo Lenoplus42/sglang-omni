@@ -4,12 +4,7 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
-from sglang_omni.config import (
-    EngineStageConfig,
-    FactoryArgs,
-    PipelineConfig,
-    StageConfig,
-)
+from sglang_omni.config import EngineStageConfig, PipelineConfig, StageConfig
 
 _PKG = "sglang_omni.models.fun_asr"
 
@@ -33,7 +28,6 @@ class FunASRPipelineConfig(PipelineConfig):
             name="asr",
             process="asr",
             factory_path=f"{_PKG}.stages.create_sglang_fun_asr_executor",
-            factory=FactoryArgs(),
             gpu=0,
             terminal=True,
         )

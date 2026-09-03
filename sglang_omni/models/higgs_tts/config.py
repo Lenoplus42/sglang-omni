@@ -46,7 +46,6 @@ class HiggsTtsPipelineConfig(PipelineConfig):
             name="audio_encoder",
             process="tts_frontend",
             factory_path=f"{_PKG}.stages.create_audio_encoder_executor",
-            factory=FactoryArgs(),
             gpu=0,
             gpu_memory_fraction=0.03,
             next="tts_engine",
