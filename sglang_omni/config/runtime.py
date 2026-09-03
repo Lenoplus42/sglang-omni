@@ -26,6 +26,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from sglang_omni.config.schema import (
+    PLACEMENT_OWNED_FACTORY_KWARGS,
     PipelineConfig,
     StageConfig,
     parse_replica_instance_name,
@@ -36,14 +37,9 @@ from sglang_omni.utils.imports import import_string
 # Kwargs owned by placement and process construction. They are injected from
 # ``factory_arg_defaults`` (and only when the factory declares them), so a
 # pipeline author returning them from ``stage_factory_kwargs`` would fight
-# the launch planner.
-_PLACEMENT_OWNED_KWARGS = frozenset(
-    {
-        "gpu_id",
-        "total_gpu_memory_fraction",
-        "process_total_gpu_memory_fraction",
-    }
-)
+# the launch planner. Config-file writes are rejected earlier, at
+# PipelineConfig validation.
+_PLACEMENT_OWNED_KWARGS = PLACEMENT_OWNED_FACTORY_KWARGS
 
 
 def resolve_stage_factory_kwargs(
@@ -80,13 +76,6 @@ def resolve_stage_typed_kwargs(stage_cfg: StageConfig) -> dict[str, Any]:
         if value is not None:
             out[name] = value
     out.update(group.model_extra or {})
-    reserved = _PLACEMENT_OWNED_KWARGS & out.keys()
-    if reserved:
-        raise ValueError(
-            f"stage {stage_cfg.name!r} sets {sorted(reserved)} under factory.*; "
-            "these kwargs are owned by placement and are injected from "
-            "stage.gpu and stage.gpu_memory_fraction"
-        )
     if stage_cfg.engine is not None:
         server_args_overrides = stage_cfg.engine.overrides()
         if server_args_overrides:
