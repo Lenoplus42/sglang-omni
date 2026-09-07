@@ -11,6 +11,7 @@ from sglang_omni.config import (
     PipelineConfig,
     StageConfig,
 )
+from sglang_omni.platforms import current_platform
 from sglang_omni.utils.cpu import bounded_intraop_threads
 
 _PKG = "sglang_omni.models.higgs_tts"
@@ -62,19 +63,11 @@ class HiggsTtsPipelineConfig(PipelineConfig):
         ),
         StageConfig(
             name="vocoder",
-            # Keep the LM and vocoder in one CUDA context by default.  Splitting
-            # them into same-GPU processes time-slices the H100 at ordinary
+            # Keep the LM and vocoder in one device context by default.  Splitting
+            # them into same-GPU processes time-slices the accelerator at ordinary
             # serving concurrency and prevents decode/vocoder overlap.
             process="pipeline",
             factory_path=f"{_PKG}.stages.create_vocoder_executor",
-            factory=FactoryArgs(
-                compile_decode=False,
-                # Before the steady cursor is established, a decode window is
-                # bounded by the default 75-row stride plus its 75-row
-                # follow-up. Capture that complete finite domain so terminal
-                # flushes cannot silently fall back to eager execution.
-                decode_cuda_graph_frame_counts=tuple(range(1, 151)),
-            ),
             gpu=0,
             gpu_memory_fraction=0.10,
             terminal=True,
@@ -98,6 +91,21 @@ class HiggsTtsPipelineConfig(PipelineConfig):
                 key: vocoder_extra[key]
                 for key in self._STREAM_CADENCE_KEYS
                 if key in vocoder_extra
+            }
+        if stage_name == "vocoder":
+            return {
+                "compile_decode": False,
+                # Before the steady cursor is established, a decode window is
+                # bounded by the default 75-row stride plus its 75-row
+                # follow-up. Capture that complete finite domain so terminal
+                # flushes cannot silently fall back to eager execution.
+                # Only CUDA captures decode CUDA graphs; other platforms (e.g.
+                # Ascend NPU) keep the domain empty and always decode eagerly.
+                "decode_cuda_graph_frame_counts": (
+                    tuple(range(1, 151))
+                    if current_platform.enable_code2wav_graph()
+                    else ()
+                ),
             }
         return {}
 

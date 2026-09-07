@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 import torch
 
+import sglang_omni.platforms as platforms
 from sglang_omni.cli.serve import patches_from_broadcast_flags
 from sglang_omni.config.resolver import ConfigResolver
 from sglang_omni.config.runtime import resolve_stage_typed_kwargs
@@ -50,10 +51,7 @@ def test_higgs_streaming_pipeline_routes_chunks_to_vocoder() -> None:
     assert stages_by_name["tts_engine"].stream_to == ["vocoder"]
     assert stages_by_name["tts_engine"].engine.overrides() == {}
     assert stages_by_name["vocoder"].process == "pipeline"
-    assert stages_by_name["vocoder"].factory.compile_decode is False
-    assert stages_by_name["vocoder"].factory.decode_cuda_graph_frame_counts == tuple(
-        range(1, 151)
-    )
+    assert config.stage_factory_kwargs("vocoder")["compile_decode"] is False
     assert stages_by_name["vocoder"].can_accept_stream_before_payload is True
 
 
@@ -1560,6 +1558,15 @@ def test_higgs_vocoder_fails_startup_when_cuda_graph_capture_fails(
         def capture_decode_cuda_graphs(self, _frame_counts) -> None:
             raise RuntimeError("capture failed")
 
+    monkeypatch.setattr(
+        platforms,
+        "current_platform",
+        SimpleNamespace(
+            device_type="cuda",
+            is_npu=lambda: False,
+            enable_code2wav_graph=lambda: True,
+        ),
+    )
     monkeypatch.setattr(stages, "resolve_checkpoint", lambda path: path)
     monkeypatch.setattr(
         stages,
