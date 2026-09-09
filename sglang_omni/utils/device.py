@@ -1,7 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Resolve the device spec a pipeline stage runs on. Never initializes a device."""
+"""Resolve the device spec a pipeline stage runs on.
+
+Only the index fallback in ``resolve_concrete_device`` touches the accelerator
+runtime (it asks which card the process is already on); everything else is
+string work.
+"""
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import torch
 
 
 def _with_index(dev_type: str, raw_index: str, index: int | None) -> str:
@@ -47,14 +57,18 @@ def resolve_concrete_device(
     import torch
 
     concrete = torch.device(resolve_device_spec(device, index))
-    if concrete.type != "cpu" and concrete.index is None:
-        # note (lennox): built from the resolved type directly -- the platform
-        # object's get_device is NotImplemented on cpu-only hosts even when a
-        # test legitimately pins device_type.
-        concrete = torch.device(
-            concrete.type, torch.get_device_module(concrete).current_device()
-        )
-    return concrete
+    if concrete.type == "cpu" or concrete.index is not None:
+        return concrete
+    if concrete.type == "mps":
+        # note (lennox): Apple exposes one Metal device and torch.mps has no
+        # current_device(); see AppleOmniPlatform._validate_device_id.
+        return torch.device("mps", 0)
+    # note (lennox): built from the resolved type directly -- the platform
+    # object's get_device is NotImplemented on cpu-only hosts even when a
+    # test legitimately pins device_type.
+    return torch.device(
+        concrete.type, torch.get_device_module(concrete).current_device()
+    )
 
 
 __all__ = ["resolve_concrete_device", "resolve_device_spec"]

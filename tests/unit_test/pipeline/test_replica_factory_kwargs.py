@@ -23,9 +23,9 @@ from tests.unit_test.fixtures.pipeline_fakes import FakeMpContext
 
 
 def _higgs_with_vocoder_cadence() -> HiggsTtsPipelineConfig:
-    """Higgs's surviving hook mirrors vocoder-set cadence onto tts_engine; the
-    vocoder defaults themselves moved into FactoryArgs and no longer flow
-    through the hook."""
+    """Higgs's hook mirrors vocoder-set cadence onto tts_engine and supplies the
+    platform-aware vocoder decode defaults (#1721); a cadence set on the
+    vocoder here must reach the engine through it."""
     config = HiggsTtsPipelineConfig(model_path="model")
     vocoder = config.stage_named("vocoder")
     vocoder.factory = type(vocoder.factory)(

@@ -239,7 +239,7 @@ def test_moss_tts_codec_runtime_overrides_take_precedence() -> None:
 
     config = ConfigManager(MossTTSPipelineConfig(model_path="model")).merge_config(
         [
-            ("preprocessing.factory.device", "cuda:7"),
+            ("preprocessing.factory.device", "cuda"),
             ("preprocessing.factory.compute_dtype", "bfloat16"),
             ("vocoder.factory.device", "cpu"),
             ("vocoder.factory.dtype", "float32"),
@@ -252,7 +252,7 @@ def test_moss_tts_codec_runtime_overrides_take_precedence() -> None:
     )
     vocoder_args = resolve_stage_factory_args(stages["vocoder"], config, gpu_id=2)
 
-    assert preprocessing_args["device"] == "cuda:7"
+    assert preprocessing_args["device"] == "cuda"
     assert preprocessing_args["compute_dtype"] == "bfloat16"
     assert preprocessing_args["gpu_id"] == 2
     assert vocoder_args["device"] == "cpu"
