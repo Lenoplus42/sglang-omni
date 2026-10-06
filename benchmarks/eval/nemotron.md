@@ -53,12 +53,13 @@ Those historical numbers are not results for a newer checkout or a different GPU
 ## Measure HTTP and native streaming
 
 ```bash
-python -m benchmarks.eval.benchmark_nemotron_http \
+python -m benchmarks.eval.benchmark_asr_seedtts \
   --meta benchmarks/results/nemotron-input/meta.lst \
-  --model nvidia/nemotron-3.5-asr-streaming-0.6b \
-  --request-language auto --score-language en \
-  --concurrencies 1 4 --repeats 3 --warmup \
-  --output benchmarks/results/nemotron-http
+  --model-path nvidia/nemotron-3.5-asr-streaming-0.6b --port 8000 \
+  --request-language auto --lang en \
+  --concurrencies 1,4 --repeats 3 --warmup \
+  --save-raw-dir benchmarks/results/nemotron-http-raw \
+  --output benchmarks/results/nemotron-http.json
 
 python -m benchmarks.eval.benchmark_nemotron_native \
   --meta benchmarks/results/nemotron-input/meta.lst \
@@ -69,19 +70,20 @@ python -m benchmarks.eval.benchmark_nemotron_native \
 ```
 
 Set native `--max-samples` to the prepared row count for a full run. For Chinese,
-use `--score-language zh` on both clients while retaining request language `auto`.
-The HTTP entry point reuses the project ASR runner and scorer; its thin wrapper
-separates request language from scoring language. The general SeedTTS HTTP CLI
-uses one language for both, which would change the reviewed experiment.
+use HTTP `--lang zh` and native `--score-language zh`, retaining HTTP
+`--request-language auto`. The shared HTTP benchmark defaults request language
+to `--lang`; the explicit override preserves the reviewed experiment.
 
 Native sends audio at recording speed by default. Add `--burst` and use a new
 output directory to send packets as quickly as possible. Each concurrency is
 the number of in-flight requests, not a guaranteed model batch size. Repeat 0
-is warmup and must be excluded from performance comparisons. Outputs use fresh
-directories to avoid mixing experiments. HTTP writes per-repeat summaries and
-raw request JSONL; native writes configuration, per-request text/errors, received
-wire events, packet timestamps and measured summaries. Failed requests remain
-in the raw output and cause a nonzero exit status.
+is native warmup and is excluded from summaries; HTTP warmup is excluded by the
+shared runner. Use distinct output paths to avoid mixing experiments. HTTP writes
+a sweep JSON with per-repeat summaries and measured per-sample JSONL under
+`--save-raw-dir`; native writes configuration, per-request text/errors, received
+wire events, packet timestamps and measured summaries. Inspect HTTP evaluation
+coverage and per-sample errors; the shared HTTP CLI does not fail solely because
+requests failed. Native retains failures and exits nonzero when requests fail.
 
 | Metric | Meaning |
 |---|---|
@@ -131,37 +133,10 @@ one failure among 12 longer burst requests at concurrency 4 (`outbound event
 budget exhausted`). That sample does not estimate a general long-audio failure
 rate. See the linked review for the complete historical results and limits.
 
-## Packaged-script smoke result (2026-10-06 UTC)
+## Validation results
 
-On one H100 80 GB, the packaged scripts completed 80/80 measured service requests
-and 32/32 warmup requests on 8 distinct English recordings (41.191 s total).
-The code base was `5ed8a8d7af86d3a486875a8deedaf0b4bf0c0687` plus these reproduction
-scripts. Serving used PyTorch 2.13.0+cu130, SGLang 0.5.21, Transformers 5.12.1
-and the FP32 server settings above. The independent reference used Transformers
-5.13.0 and the same checkpoint. All 112 normalized service transcripts matched
-the corresponding official mode. Both reference repetitions produced identical
-tokens (32 generations: 8 recordings × 2 modes × 2 repeats).
-
-| Path | Concurrency | Measured requests | Audio seconds / second | WER |
-|---|---|---|---|---|
-| HTTP | 1 | 16/16 | 73.08–73.10 | 5.833% |
-| HTTP | 4 | 16/16 | 184.77–186.21 | 5.833% |
-| Native burst | 1 | 16/16 | 9.99–10.04 | 6.667% |
-| Native burst | 4 | 16/16 | 12.78–14.50 | 6.667% |
-| Native paced | 1 | 8/8 | 0.995 | 6.667% |
-| Native paced | 4 | 8/8 | 3.252 | 6.667% |
-
-HTTP and burst used one excluded warmup plus two measured repeats per concurrency;
-paced input used one measured repeat without a separate warmup, on the already
-warm server. Paced first-text p50 was 901.6 / 904.7 ms and EOS-to-final p50 was
-21.4 / 22.3 ms at concurrency 1 / 4. Ranges span the two measured repeats, not
-confidence intervals. These are small-cohort execution checks, not new
-corpus-quality, capacity or long-audio claims.
-
-To select the same recordings, prepare the first 20 English dataset rows with the
-pinned revision above, then retain row indices `0, 2, 4, 6, 8, 10, 12, 14` from
-`meta.lst` (zero-based). Those rows contain eight distinct PCM recordings. Use
-that metadata for all four entry points. Set `--max-samples 8` for native,
-`--repeats 2 --warmup` for HTTP/burst, and `--repeats 1` without `--warmup`
-for paced input. Run the official reference with `--repeats 2` after stopping
-the service.
+See [PR #2571](https://github.com/sgl-project/sglang-omni/pull/2571) for the
+small H100 execution check and [the #1748 review](https://github.com/sgl-project/sglang-omni/pull/1748#issuecomment-5861686350)
+for the larger historical evaluation. The H100 check used the initial dedicated
+HTTP wrapper; HTTP commands above now use the shared ASR benchmark with the same
+request language and scoring rules. The native and reference scripts are unchanged.

@@ -14,7 +14,7 @@ import pytest
 from aiohttp import web
 from websockets.asyncio.server import ServerConnection, serve
 
-from benchmarks.eval.benchmark_nemotron_http import main as run_http
+from benchmarks.eval.benchmark_asr_seedtts import main as run_http
 from benchmarks.eval.benchmark_nemotron_native import run
 from benchmarks.eval.nemotron_native_client import measure
 
@@ -167,22 +167,24 @@ def test_timeout_retains_received_events() -> None:
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("request_language", [None, "auto"])
 def test_http_separates_request_language_and_scoring(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, request_language: str | None
 ) -> None:
     with wave.open(str(tmp_path / "audio.wav"), "wb") as audio:
         audio.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
         audio.writeframes(b"\0\0" * 1000)
     metadata = tmp_path / "meta.lst"
     metadata.write_text("sample|hello|audio.wav|hello\n", encoding="utf-8")
-    output = tmp_path / "results"
+    output = tmp_path / "results.json"
+    expected_language = "en" if request_language is None else request_language
 
     async def scenario() -> None:
         languages: list[str] = []
 
         async def transcribe(request: web.Request) -> web.Response:
             form = await request.post()
-            assert form["language"] == "auto"
+            assert form["language"] == expected_language
             languages.append(str(form["language"]))
             return web.json_response({"text": "hello"})
 
@@ -200,33 +202,45 @@ def test_http_separates_request_language_and_scoring(
                     sys,
                     "argv",
                     [
-                        "benchmark_nemotron_http",
+                        "benchmark_asr_seedtts",
                         "--meta",
                         str(metadata),
                         "--output",
                         str(output),
-                        "--model",
+                        "--model-path",
                         "test",
                         "--port",
                         str(port),
                         "--concurrencies",
+                        "1,4",
+                        "--repeats",
                         "1",
-                        "4",
+                        "--disable-resource-monitor",
+                        "--save-raw-dir",
+                        str(tmp_path / "raw"),
                         "--warmup",
-                        "--score-language",
+                        "--lang",
                         "en",
                     ],
                 )
-                await run_http()
+                if request_language is not None:
+                    monkeypatch.setattr(
+                        sys, "argv", [*sys.argv, "--request-language", request_language]
+                    )
+                else:
+                    pass
+                await asyncio.to_thread(run_http)
                 await site.stop()
         finally:
             await runner.cleanup()
-        assert languages == ["auto"] * 4
+        assert languages == [expected_language] * 4
 
     asyncio.run(scenario())
-    for concurrency in (1, 4):
-        warmup = json.loads((output / f"c{concurrency}-r0.json").read_text())
-        measured = json.loads((output / f"c{concurrency}-r1.json").read_text())
-        assert warmup["warmup"] is True and measured["warmup"] is False
-        assert measured["request_language"] == "auto"
-        assert measured["summary"]["wer_corpus"] == 0
+    results = json.loads(output.read_text())
+    assert results["config"]["lang"] == "en"
+    assert results["config"]["request_language"] == expected_language
+    assert results["config"]["warmup"] is True
+    for result in results["results"]:
+        assert result["total"] == result["evaluated"] == 1
+        assert result["corpus_wer"]["mean"] == 0
+    assert len(list((tmp_path / "raw").glob("*.jsonl"))) == 2
