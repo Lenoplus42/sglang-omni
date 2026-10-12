@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import re
 
+from sglang_omni.admission import QueueFullError
+
 _BAD_REQUEST_MARKERS = (
     "Unsupported language:",
     "longer than the model's context length",
@@ -19,6 +21,7 @@ _BAD_REQUEST_MARKERS = (
     "Invalid media data while extracting embedded audio from",
     "Invalid media data while decoding video path=",
     "Qwen3-Omni requires all videos in a request to have the same sampled FPS",
+    "chat content part",
     "max_new_tokens must be",
     "Fun-ASR Apple currently requires temperature=0",
     "exceeds the maximum allowed length",
@@ -55,6 +58,17 @@ _BAD_REQUEST_PATTERNS = (
     re.compile(r"^Request\s+\S+\s+requires too many SWA KV tokens for"),
     re.compile(r"^Request .+ already exists$", re.DOTALL),
     re.compile(r"^stop_regex is \d+ bytes, over the \d+-byte limit"),
+    re.compile(r"^Media URL returned HTTP 404: "),
+    re.compile(
+        r"^Qwen3-TTS (?:Base|CustomVoice|VoiceDesign) "
+        r"(?:checkpoint does not support|does not accept) "
+    ),
+    re.compile(
+        r"^Qwen3-TTS (?:Base|VoiceDesign) requires "
+        r"(?:ref_audio|reference audio|non-empty ref_text|instructions)\b"
+    ),
+    re.compile(r"^Qwen3-TTS task_type must be one of "),
+    re.compile(r"^Unsupported Qwen3-TTS CustomVoice speaker "),
 )
 
 
@@ -63,3 +77,13 @@ def is_bad_request_error(exc: BaseException) -> bool:
     return any(marker in message for marker in _BAD_REQUEST_MARKERS) or any(
         pattern.search(message) is not None for pattern in _BAD_REQUEST_PATTERNS
     )
+
+
+def generation_error_status_code(exc: BaseException) -> int:
+    """Map a failure to 503 for a full queue, 400 for a caller error, else 500."""
+    if QueueFullError.matches(exc):
+        return 503
+    elif is_bad_request_error(exc):
+        return 400
+    else:
+        return 500

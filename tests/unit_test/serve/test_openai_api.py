@@ -10,12 +10,13 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from sglang_omni.admission import QueueFullError
 from sglang_omni.client import Client, ClientError, GenerateChunk
 from sglang_omni.client.audio import encode_pcm
-from sglang_omni.client.client import extract_inputs
+from sglang_omni.client.client import StreamedStopTrimmer, extract_inputs
 from sglang_omni.client.types import GenerateRequest, UsageInfo
 from sglang_omni.pipeline.coordinator import Coordinator
 from sglang_omni.proto import (
@@ -26,15 +27,18 @@ from sglang_omni.proto import (
 )
 from sglang_omni.serve import create_app
 from sglang_omni.serve.openai_api import (
+    ServerStatus,
     _ClosableStreamingResponse,
     await_speech_response,
     build_chat_generate_request,
+    chat_non_stream,
     chat_stream,
     speech_audio_response,
 )
 from sglang_omni.serve.protocol import ChatCompletionRequest, CreateSpeechRequest
 from sglang_omni.serve.speech_service import SpeechRequestValidator
 from sglang_omni.serve.speech_stream_outcomes import SpeechStreamOutcomes
+from sglang_omni.serve.speech_to_text import complete_speech_to_text_request
 from sglang_omni.serve.transcriptions import (
     _first_transcription_chunk,
     _transcription_stream,
@@ -53,7 +57,13 @@ MODEL_FAMILIES = {
 class FaultInjectingCoordinator(Coordinator):
     """Inject a model-stage failure through the real Coordinator/Client path."""
 
-    def __init__(self, terminal_stage: str, error: str = "cuda out of memory"):
+    def __init__(
+        self,
+        terminal_stage: str,
+        error: str = "cuda out of memory",
+        *,
+        partial_output: bool = True,
+    ) -> None:
         super().__init__(
             completion_endpoint="inproc://complete",
             abort_endpoint="inproc://abort",
@@ -63,6 +73,7 @@ class FaultInjectingCoordinator(Coordinator):
         self.control_plane = RecordingCoordinatorControlPlane()
         self.terminal_stage = terminal_stage
         self.error = error
+        self.partial_output = partial_output
         self.register_stage("preprocess", "inproc://preprocess")
 
     async def submit_request(
@@ -79,8 +90,10 @@ class FaultInjectingCoordinator(Coordinator):
         )
         if not isinstance(request, OmniRequest):
             request = OmniRequest(inputs=request)
-        if bool(request.params.get("stream", False)):
+        if self.partial_output and bool(request.params.get("stream", False)):
             await self.handle_stream(self.partial_stream_message(request_id, request))
+        else:
+            pass
         await self.handle_completion(
             CompleteMessage(
                 request_id=request_id,
@@ -112,8 +125,17 @@ class FaultInjectingCoordinator(Coordinator):
         )
 
 
-def fault_client(model_name: str, error: str = "cuda out of memory") -> Client:
-    return Client(FaultInjectingCoordinator(MODEL_FAMILIES[model_name], error=error))
+def fault_client(
+    model_name: str,
+    error: str = "cuda out of memory",
+    *,
+    partial_output: bool = True,
+) -> Client:
+    return Client(
+        FaultInjectingCoordinator(
+            MODEL_FAMILIES[model_name], error=error, partial_output=partial_output
+        )
+    )
 
 
 class SuccessfulSpeechClient:
@@ -344,6 +366,25 @@ class BlockingNonStreamingSpeechClient:
         allow_format_fallback: bool = True,
     ):
         del request, request_id, response_format, speed, allow_format_fallback
+        self.started.set()
+        await asyncio.Future()
+
+    async def abort(self, request_id: str) -> None:
+        self.aborted.append(request_id)
+
+
+class BlockingCompletionClient:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.aborted: list[str] = []
+
+    async def completion(
+        self,
+        request: GenerateRequest,
+        *,
+        request_id: str,
+        audio_format: str = "wav",
+    ) -> None:
         self.started.set()
         await asyncio.Future()
 
@@ -682,6 +723,110 @@ def test_non_streaming_http_faults_return_500(model_name: str) -> None:
     assert "cuda out of memory" in speech_resp.json()["error"]["message"]
 
 
+@pytest.mark.parametrize("endpoint", ["/v1/chat/completions", "/generate"])
+def test_non_streaming_queue_full_returns_503(endpoint: str) -> None:
+    client = TestClient(
+        create_app(
+            fault_client("qwen3-omni", QueueFullError.MESSAGE),
+            model_name="qwen3-omni",
+        )
+    )
+
+    response = client.post(
+        endpoint, json={"messages": [{"role": "user", "content": "hello"}]}
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == QueueFullError.MESSAGE
+
+
+@pytest.mark.parametrize(
+    ("error", "error_type", "code"),
+    [
+        (QueueFullError.MESSAGE, "server_error", 503),
+        (
+            "Media URL returned HTTP 404: https://example.com/missing.png",
+            "invalid_request_error",
+            400,
+        ),
+        ("cuda out of memory", "server_error", 500),
+    ],
+)
+def test_chat_stream_failure_before_output_reports_error_before_done_sentinel(
+    error: str, error_type: str, code: int, caplog: pytest.LogCaptureFixture
+) -> None:
+    client = TestClient(
+        create_app(
+            fault_client("qwen3-omni", error, partial_output=False),
+            model_name="qwen3-omni",
+        )
+    )
+
+    with caplog.at_level(logging.WARNING, logger="sglang_omni.serve.openai_api"):
+        response = client.post(
+            "/v1/chat/completions",
+            json={"messages": [{"role": "user", "content": "hello"}], "stream": True},
+        )
+
+    assert response.status_code == 200
+    events = [
+        line.removeprefix("data: ")
+        for line in response.iter_lines()
+        if line.startswith("data: ")
+    ]
+    assert json.loads(events[0]) == {
+        "error": {"message": error, "type": error_type, "code": code}
+    }
+    assert events[1:] == ["[DONE]"]
+    assert any(record.exc_info for record in caplog.records) == (code == 500)
+
+
+@pytest.mark.parametrize(
+    ("invalid_fields", "field"),
+    [
+        ({"max_tokens": 0}, "max_tokens"),
+        ({"max_tokens": -1}, "max_tokens"),
+        ({"max_completion_tokens": 0}, "max_completion_tokens"),
+    ],
+)
+def test_chat_rejects_invalid_envelope_before_generation(
+    invalid_fields: dict[str, int | list[str]], field: str
+) -> None:
+    client = TestClient(create_app(fault_client("qwen3-omni"), model_name="qwen3-omni"))
+
+    response = client.post(
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "hello"}], **invalid_fields},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["body", field]
+
+
+@pytest.mark.parametrize(
+    ("media", "expected_status"),
+    [
+        ({}, 422),
+        ({"audios": []}, 422),
+        ({"audios": ["caller.wav"]}, 500),
+        ({"images": ["image.png"]}, 500),
+        ({"videos": ["clip.mp4"]}, 500),
+    ],
+)
+def test_chat_empty_messages_need_top_level_media(
+    media: dict[str, list[str]], expected_status: int
+) -> None:
+    client = TestClient(create_app(fault_client("qwen3-omni"), model_name="qwen3-omni"))
+
+    response = client.post("/v1/chat/completions", json={"messages": [], **media})
+
+    assert response.status_code == expected_status
+    if expected_status == 422:
+        assert "messages must not be empty" in response.json()["detail"][0]["msg"]
+    else:
+        assert "cuda out of memory" in response.json()["detail"]
+
+
 def test_speech_stream_admission_reject_returns_503_without_traceback(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -804,6 +949,24 @@ def test_create_app_passes_model_specific_speech_input_limit() -> None:
     )
 
     assert app.state.speech_service.max_speech_input_chars is None
+
+
+def test_health_reports_starting_until_the_launcher_marks_the_server_up() -> None:
+    client, coordinator, _ = streaming_client()
+    app = create_app(client)
+    http_client = TestClient(app)
+
+    coordinator.running = True
+    app.state.server_status = ServerStatus.STARTING
+    starting = http_client.get("/health")
+    app.state.server_status = ServerStatus.UP
+    healthy = http_client.get("/health")
+    coordinator.running = False
+    stopped = http_client.get("/health")
+
+    assert (starting.status_code, starting.json()["status"]) == (503, "starting")
+    assert (healthy.status_code, healthy.json()["status"]) == (200, "healthy")
+    assert (stopped.status_code, stopped.json()["status"]) == (503, "unhealthy")
 
 
 @pytest.mark.parametrize("stream", [False, True])
@@ -997,6 +1160,107 @@ def test_chat_stream_failure_reports_error_before_done_sentinel() -> None:
         "type": "server_error",
         "code": 500,
     }
+
+
+class TextDeltaCoordinator:
+    """Answer chat with fixed text: whole when buffered, as deltas when streamed.
+
+    A None delta is an audio chunk that finishes the audio.
+    """
+
+    def __init__(self, deltas: list[str | None]) -> None:
+        self.deltas = deltas
+
+    async def submit(self, request_id: str, omni_request: OmniRequest) -> object:
+        text = "".join(delta for delta in self.deltas if delta is not None)
+        return {"text": text, "finish_reason": "stop"}
+
+    async def stream(
+        self, request_id: str, omni_request: OmniRequest
+    ) -> AsyncIterator[StreamMessage]:
+        for index, delta in enumerate(self.deltas):
+            modality = "audio" if delta is None else "text"
+            chunk: dict[str, object] = {"modality": modality}
+            if delta is not None:
+                chunk["text"] = delta
+            else:
+                pass
+            if delta is None or index == len(self.deltas) - 1:
+                chunk["finish_reason"] = "stop"
+            else:
+                pass
+            yield StreamMessage(
+                request_id=request_id,
+                from_stage="decode",
+                chunk=chunk,
+                stage_name="decode",
+                modality=modality,
+            )
+
+
+def test_chat_answer_excludes_the_matched_stop_string() -> None:
+    coordinator = TextDeltaCoordinator(["1, 2", ", 3"])
+    app = create_app(Client(coordinator), model_name="qwen3-omni")
+    body = {"messages": [{"role": "user", "content": "count"}], "stop": [", 3"]}
+
+    response = TestClient(app).post("/v1/chat/completions", json=body)
+
+    assert response.status_code == 200
+    assert response.json()["choices"][0]["message"]["content"] == "1, 2"
+
+
+@pytest.mark.parametrize(
+    ("deltas", "stop", "expected"),
+    [
+        pytest.param(["1, 2", ", 3"], [", 3"], "1, 2", id="whole"),
+        pytest.param(["a", "\n", "b\n", "\nc"], ["\n\n"], "a\nb", id="across-deltas"),
+        pytest.param(["a", "\n"], ["\n\n"], "a\n", id="never-completed"),
+        pytest.param(["a", "\n", None, "\nb"], ["\n\n"], "a", id="audio-ends-mid-stop"),
+        pytest.param(["a", "\n", None], ["\n\n"], "a\n", id="text-never-ends"),
+    ],
+)
+def test_chat_stream_never_sends_a_stop_string(
+    deltas: list[str | None], stop: list[str], expected: str
+) -> None:
+    app = create_app(Client(TextDeltaCoordinator(deltas)), model_name="qwen3-omni")
+    body = {
+        "messages": [{"role": "user", "content": "count"}],
+        "stop": stop,
+        "stream": True,
+    }
+
+    response = TestClient(app).post("/v1/chat/completions", json=body)
+    events = [
+        json.loads(line[len("data: ") :])
+        for line in response.text.splitlines()
+        if line.startswith("data: {")
+    ]
+    content = [
+        choice["delta"]["content"]
+        for event in events
+        for choice in event["choices"]
+        if choice["delta"].get("content")
+    ]
+
+    assert "".join(content) == expected
+    assert events[-1]["choices"][0]["finish_reason"] == "stop"
+
+
+def test_stream_stop_check_is_bounded_by_the_held_text() -> None:
+    class CountingStop(str):
+        prefixes = 0
+
+        def __getitem__(self, key: object) -> str:
+            CountingStop.prefixes += 1
+            return super().__getitem__(key)
+
+    trimmer = StreamedStopTrimmer(stop=[CountingStop("x" * 10_000)])
+    deltas = ["ab", "cd", "ef"]
+
+    released = "".join(trimmer.push(delta) for delta in deltas) + trimmer.finish()
+
+    assert released == "abcdef"
+    assert CountingStop.prefixes <= sum(len(delta) for delta in deltas)
 
 
 def test_chat_asgi_send_failure_aborts_backend_and_cleans_state() -> None:
@@ -1290,20 +1554,32 @@ def test_chat_request_omits_explicit_params_when_sampling_omitted() -> None:
 
 
 @pytest.mark.parametrize("use_audio_in_video", [True, False])
-def test_chat_request_forwards_embedded_video_audio_flag(
+@pytest.mark.parametrize(
+    ("content", "videos"),
+    [
+        ("hello", ["clip.mp4"]),
+        ([{"type": "video_url", "video_url": {"url": "clip.mp4"}}], None),
+    ],
+)
+def test_chat_request_forwards_video_options(
+    content: str | list[dict[str, object]],
+    videos: list[str] | None,
     use_audio_in_video: bool,
 ) -> None:
     req = ChatCompletionRequest(
         model="qwen3-omni",
-        messages=[{"role": "user", "content": "hello"}],
-        videos=["clip.mp4"],
+        messages=[{"role": "user", "content": content}],
+        videos=videos,
         use_audio_in_video=use_audio_in_video,
+        video_fps=4.0,
+        video_max_frames=8,
     )
 
-    gen_req = build_chat_generate_request(req)
+    inputs = extract_inputs(build_chat_generate_request(req))
 
-    assert gen_req.metadata["use_audio_in_video"] is use_audio_in_video
-    assert extract_inputs(gen_req)["use_audio_in_video"] is use_audio_in_video
+    assert inputs["use_audio_in_video"] is use_audio_in_video
+    assert inputs["video_fps"] == 4.0
+    assert inputs["video_max_frames"] == 8
 
 
 def test_chat_request_preserves_explicit_default_sampling_values() -> None:
@@ -1674,6 +1950,56 @@ def test_speech_response_disconnect_aborts_active_request() -> None:
         with pytest.raises(asyncio.CancelledError):
             await task
         assert client.aborted == ["req-1"]
+
+    asyncio.run(drive())
+
+
+def test_buffered_chat_aborts_its_request_on_client_disconnect() -> None:
+    async def drive() -> None:
+        client = BlockingCompletionClient()
+        request = DisconnectingRequest()
+        task = asyncio.create_task(
+            chat_non_stream(
+                request=request,
+                client=client,
+                gen_req=GenerateRequest(model="qwen3-omni", prompt="hello"),
+                request_id="req-1",
+                response_id="chatcmpl-req-1",
+                created=0,
+                model="qwen3-omni",
+                req=ChatCompletionRequest(
+                    messages=[{"role": "user", "content": "hello"}]
+                ),
+                audio_format="wav",
+            )
+        )
+        await client.started.wait()
+        request.disconnected.set()
+        with pytest.raises(HTTPException, match="Client disconnected"):
+            await task
+        assert client.aborted == ["req-1"]
+
+    asyncio.run(drive())
+
+
+def test_speech_to_text_completion_aborts_its_request_on_client_disconnect() -> None:
+    async def drive() -> None:
+        client = BlockingCompletionClient()
+        request = DisconnectingRequest()
+        task = asyncio.create_task(
+            complete_speech_to_text_request(
+                request,
+                client,
+                GenerateRequest(model="moss-td", prompt="hello"),
+                request_id="transcription-1",
+                error_log_message="Error transcribing audio for request %s",
+            )
+        )
+        await client.started.wait()
+        request.disconnected.set()
+        with pytest.raises(HTTPException, match="Client disconnected"):
+            await task
+        assert client.aborted == ["transcription-1"]
 
     asyncio.run(drive())
 
@@ -2267,8 +2593,16 @@ def test_chunk_segments_skip_silent_chunks() -> None:
     assert response.segments[1].start == 2.0
 
 
-def test_chunk_failure_fails_the_whole_request() -> None:
-    transcription_client = ChunkRecordingTranscriptionClient(fail_chunk=1)
+@pytest.mark.parametrize(
+    ("message", "expected_status"),
+    [("cuda out of memory", 500), (QueueFullError.MESSAGE, 503)],
+)
+def test_chunk_failure_fails_the_whole_request(
+    message: str, expected_status: int
+) -> None:
+    transcription_client = ChunkRecordingTranscriptionClient(
+        fail_chunk=1, fail_message=message
+    )
     client = chunking_test_client(transcription_client)
 
     response = client.post(
@@ -2278,9 +2612,9 @@ def test_chunk_failure_fails_the_whole_request() -> None:
     )
 
     # No partial 200: one failed chunk fails the request, naming the chunk.
-    assert response.status_code == 500
+    assert response.status_code == expected_status
     assert "chunk 1" in response.json()["detail"]
-    assert "cuda out of memory" in response.json()["detail"]
+    assert message in response.json()["detail"]
 
 
 def test_chunk_bad_request_failure_maps_to_400() -> None:
@@ -3281,8 +3615,20 @@ def test_transcription_endpoint_maps_processor_max_length_error_to_400() -> None
     assert "exceeds max_length" in response.json()["detail"]
 
 
-def test_transcription_endpoint_keeps_500_for_server_errors() -> None:
-    transcription_client = FailingTranscriptionClient("scheduler worker crashed")
+@pytest.mark.parametrize(
+    ("message", "exc_type", "expected_status"),
+    [
+        ("scheduler worker crashed", ClientError, 500),
+        (QueueFullError.MESSAGE, RuntimeError, 503),
+    ],
+)
+def test_transcription_endpoint_maps_server_and_overload_errors(
+    message: str,
+    exc_type: type[Exception],
+    expected_status: int,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    transcription_client = FailingTranscriptionClient(message, exc_type=exc_type)
     client = TestClient(
         create_app(
             transcription_client,
@@ -3290,13 +3636,15 @@ def test_transcription_endpoint_keeps_500_for_server_errors() -> None:
         )
     )
 
-    response = client.post(
-        "/v1/audio/transcriptions",
-        data={"model": "OpenMOSS-Team/MOSS-Transcribe-Diarize"},
-        files={"file": ("sample.wav", b"RIFF", "audio/wav")},
-    )
+    with caplog.at_level(logging.WARNING):
+        response = client.post(
+            "/v1/audio/transcriptions",
+            data={"model": "OpenMOSS-Team/MOSS-Transcribe-Diarize"},
+            files={"file": ("sample.wav", b"RIFF", "audio/wav")},
+        )
 
-    assert response.status_code == 500
+    assert response.status_code == expected_status
+    assert not any(record.exc_info for record in caplog.records)
 
 
 def test_transcription_stream_emits_delta_done_and_sentinel() -> None:
@@ -3386,11 +3734,14 @@ def test_transcription_first_chunk_disconnect_aborts_backend() -> None:
     asyncio.run(drive())
 
 
-def test_transcription_stream_keeps_500_for_server_errors() -> None:
-    transcription_client = FailingTranscriptionClient(
-        "scheduler worker crashed",
-        exc_type=RuntimeError,
-    )
+@pytest.mark.parametrize(
+    ("message", "expected_status"),
+    [("scheduler worker crashed", 500), (QueueFullError.MESSAGE, 503)],
+)
+def test_transcription_stream_maps_server_and_overload_errors(
+    message: str, expected_status: int, caplog: pytest.LogCaptureFixture
+) -> None:
+    transcription_client = FailingTranscriptionClient(message, exc_type=RuntimeError)
     client = TestClient(
         create_app(
             transcription_client,
@@ -3398,16 +3749,18 @@ def test_transcription_stream_keeps_500_for_server_errors() -> None:
         )
     )
 
-    response = client.post(
-        "/v1/audio/transcriptions",
-        data={
-            "model": "OpenMOSS-Team/MOSS-Transcribe-Diarize",
-            "stream": "true",
-        },
-        files={"file": ("sample.wav", b"RIFF", "audio/wav")},
-    )
+    with caplog.at_level(logging.WARNING):
+        response = client.post(
+            "/v1/audio/transcriptions",
+            data={
+                "model": "OpenMOSS-Team/MOSS-Transcribe-Diarize",
+                "stream": "true",
+            },
+            files={"file": ("sample.wav", b"RIFF", "audio/wav")},
+        )
 
-    assert response.status_code == 500
+    assert response.status_code == expected_status
+    assert any(record.exc_info for record in caplog.records) == (expected_status == 500)
 
 
 def test_transcription_endpoint_uses_openai_temperature_default() -> None:
