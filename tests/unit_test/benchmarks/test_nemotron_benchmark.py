@@ -7,6 +7,7 @@ import json
 import socket
 import sys
 import wave
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -25,93 +26,103 @@ from benchmarks.realtime_asr.client import run_session
 from benchmarks.realtime_asr.metrics import check_invariants, latency_metrics
 from benchmarks.realtime_asr.replay import load_trace, replay_trace
 
+NativeFault = Literal[
+    "none", "duplicate", "duration", "identity", "delta", "error", "empty-reference"
+]
+
+
+@dataclass(kw_only=True)
+class NativeTestServer:
+    fault: NativeFault = "none"
+    sequences: list[int] = field(default_factory=list)
+    captured_audio: list[bytes] = field(default_factory=list)
+
+    async def handle(self, socket: ServerConnection) -> None:
+        await socket.send(json.dumps({"type": "session.created"}))
+        configuration = json.loads(await socket.recv())
+        assert configuration["session"] == {"output_modalities": ["text"]}
+        await socket.send(json.dumps({"type": "session.updated"}))
+        audio = bytearray()
+        async for raw in socket:
+            event = json.loads(raw)
+            if event["type"] == "input_audio_buffer.append":
+                self.sequences.append(event["sglang"]["seq"])
+                await socket.send(
+                    json.dumps(
+                        {
+                            "type": "sglang.input_audio.accepted",
+                            "seq": event["sglang"]["seq"],
+                        }
+                    )
+                )
+                audio.extend(base64.b64decode(event["audio"]))
+                if event["sglang"]["seq"] == 0:
+                    await socket.send(
+                        json.dumps(
+                            {
+                                "type": "response.output_text.delta",
+                                "response_id": "r1",
+                                "delta": "hello",
+                            }
+                        )
+                    )
+                else:
+                    pass
+            elif event["type"] == "sglang.input_audio.end":
+                self.captured_audio.append(bytes(audio))
+                if self.fault == "error":
+                    await socket.send(
+                        json.dumps({"type": "error", "error": "injected"})
+                    )
+                    return
+                else:
+                    final = {
+                        "type": "response.output_text.done",
+                        "response_id": "wrong" if self.fault == "identity" else "r1",
+                        "text": "wrong" if self.fault == "delta" else "hello",
+                    }
+                    await socket.send(json.dumps(final))
+                if self.fault == "duplicate":
+                    await socket.send(json.dumps(final))
+                else:
+                    pass
+                await socket.send(
+                    json.dumps(
+                        {
+                            "type": "response.done",
+                            "response": {"status": "completed"},
+                        }
+                    )
+                )
+                await socket.send(
+                    json.dumps(
+                        {
+                            "type": "sglang.input_audio.drained",
+                            "consumed_ms": (
+                                0 if self.fault == "duration" else len(audio) / 32
+                            ),
+                        }
+                    )
+                )
+            elif event["type"] == "session.close":
+                await socket.send(json.dumps({"type": "session.closed"}))
+                return
+            else:
+                raise AssertionError(event)
+
 
 @pytest.mark.parametrize(
     "fault",
     ["none", "duplicate", "duration", "identity", "delta", "error", "empty-reference"],
 )
 def test_wire_contract(
-    fault: Literal[
-        "none", "duplicate", "duration", "identity", "delta", "error", "empty-reference"
-    ],
+    fault: NativeFault,
     tmp_path: Path,
 ) -> None:
     async def scenario() -> None:
-        sequences: list[int] = []
+        server = NativeTestServer(fault=fault)
 
-        async def server(socket: ServerConnection) -> None:
-            await socket.send(json.dumps({"type": "session.created"}))
-            configuration = json.loads(await socket.recv())
-            assert configuration["session"] == {"output_modalities": ["text"]}
-            await socket.send(json.dumps({"type": "session.updated"}))
-            audio = bytearray()
-            async for raw in socket:
-                event = json.loads(raw)
-                if event["type"] == "input_audio_buffer.append":
-                    sequences.append(event["sglang"]["seq"])
-                    await socket.send(
-                        json.dumps(
-                            {
-                                "type": "sglang.input_audio.accepted",
-                                "seq": event["sglang"]["seq"],
-                            }
-                        )
-                    )
-                    audio.extend(base64.b64decode(event["audio"]))
-                    if event["sglang"]["seq"] == 0:
-                        await socket.send(
-                            json.dumps(
-                                {
-                                    "type": "response.output_text.delta",
-                                    "response_id": "r1",
-                                    "delta": "hello",
-                                }
-                            )
-                        )
-                    else:
-                        pass
-                elif event["type"] == "sglang.input_audio.end":
-                    if fault == "error":
-                        await socket.send(
-                            json.dumps({"type": "error", "error": "injected"})
-                        )
-                        return
-                    else:
-                        final = {
-                            "type": "response.output_text.done",
-                            "response_id": "wrong" if fault == "identity" else "r1",
-                            "text": "wrong" if fault == "delta" else "hello",
-                        }
-                        await socket.send(json.dumps(final))
-                    if fault == "duplicate":
-                        await socket.send(json.dumps(final))
-                    else:
-                        pass
-                    await socket.send(
-                        json.dumps(
-                            {
-                                "type": "response.done",
-                                "response": {"status": "completed"},
-                            }
-                        )
-                    )
-                    await socket.send(
-                        json.dumps(
-                            {
-                                "type": "sglang.input_audio.drained",
-                                "consumed_ms": (
-                                    0 if fault == "duration" else len(audio) / 32
-                                ),
-                            }
-                        )
-                    )
-                elif event["type"] == "session.close":
-                    await socket.send(json.dumps({"type": "session.closed"}))
-                    return
-                else:
-                    raise AssertionError(event)
-
-        async with serve(server, "127.0.0.1", 0) as listener:
+        async with serve(server.handle, "127.0.0.1", 0) as listener:
             port = listener.sockets[0].getsockname()[1]
             trace = await run_session(
                 f"ws://127.0.0.1:{port}",
@@ -120,7 +131,7 @@ def test_wire_contract(
                 packet_ms=20,
                 paced=True,
             )
-        assert sequences == [0, 1, 2, 3]
+        assert server.sequences == [0, 1, 2, 3]
         if fault in {"none", "empty-reference"}:
             assert check_invariants(trace) == []
             assert trace.completed_text == "hello"
@@ -131,15 +142,13 @@ def test_wire_contract(
             assert trace.received[-1].type == "session.closed"
         else:
             assert check_invariants(trace)
-        sequences.clear()
+        server.sequences.clear()
         with wave.open(str(tmp_path / "audio.wav"), "wb") as audio:
             audio.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
             audio.writeframes(b"\0\0" * 1000)
-        meta = tmp_path / "meta.lst"
         reference = "Mhm." if fault == "empty-reference" else "hello"
-        meta.write_text(f"sample|{reference}|audio.wav|{reference}\n")
         output = tmp_path / "results"
-        async with serve(server, "127.0.0.1", 0) as listener:
+        async with serve(server.handle, "127.0.0.1", 0) as listener:
             port = listener.sockets[0].getsockname()[1]
             result = await run_asr_realtime_once(
                 [
@@ -282,59 +291,10 @@ def test_native_sweep_preserves_pcm_and_excludes_warmup(
         audio.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
         audio.writeframes(pcm)
     assert load_pcm16(str(audio_path)) == pcm
-    captured_audio: list[bytes] = []
-
-    async def server(connection: ServerConnection) -> None:
-        await connection.send(json.dumps({"type": "session.created", "session": {}}))
-        await connection.recv()
-        await connection.send(json.dumps({"type": "session.updated", "session": {}}))
-        audio_bytes = bytearray()
-        async for raw in connection:
-            event = json.loads(raw)
-            if event["type"] == "input_audio_buffer.append":
-                audio_bytes.extend(base64.b64decode(event["audio"]))
-                await connection.send(
-                    json.dumps(
-                        {
-                            "type": "sglang.input_audio.accepted",
-                            "seq": event["sglang"]["seq"],
-                        }
-                    )
-                )
-            elif event["type"] == "sglang.input_audio.end":
-                captured_audio.append(bytes(audio_bytes))
-                if fail_warmup:
-                    await connection.send(
-                        json.dumps({"type": "error", "error": "injected"})
-                    )
-                    return
-                else:
-                    pass
-                for response in (
-                    {
-                        "type": "response.output_text.delta",
-                        "response_id": "r",
-                        "delta": "hello",
-                    },
-                    {
-                        "type": "response.output_text.done",
-                        "response_id": "r",
-                        "text": "hello",
-                    },
-                    {"type": "response.done", "response": {"status": "completed"}},
-                    {
-                        "type": "sglang.input_audio.drained",
-                        "consumed_ms": len(audio_bytes) / 32,
-                    },
-                ):
-                    await connection.send(json.dumps(response))
-            else:
-                assert event["type"] == "session.close"
-                await connection.send(json.dumps({"type": "session.closed"}))
-                return
+    server = NativeTestServer(fault="error" if fail_warmup else "none")
 
     async def scenario() -> None:
-        async with serve(server, "127.0.0.1", 0) as listener:
+        async with serve(server.handle, "127.0.0.1", 0) as listener:
             arguments = argparse.Namespace(
                 host="127.0.0.1",
                 port=listener.sockets[0].getsockname()[1],
@@ -359,7 +319,7 @@ def test_native_sweep_preserves_pcm_and_excludes_warmup(
                     await run_sweep(arguments, samples)
                 saved = load_trace(next((tmp_path / "traces").glob("*/000000.json")))
                 assert replay_trace(saved)["verdict"] == "fail"
-                assert len(captured_audio) == 1
+                assert len(server.captured_audio) == 1
                 return
             else:
                 results = await run_sweep(arguments, samples)
@@ -367,7 +327,7 @@ def test_native_sweep_preserves_pcm_and_excludes_warmup(
         assert [result["config"]["repeat"] for result in results] == [1, 2, 1, 2]
         assert all(not result["config"]["warmup"] for result in results)
         assert all(result["summary"]["success"] == 1 for result in results)
-        assert captured_audio == [pcm] * 6
+        assert server.captured_audio == [pcm] * 6
         manifests = [
             json.loads(path.read_text())
             for path in (tmp_path / "traces").glob("*/manifest.json")

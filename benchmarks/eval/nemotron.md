@@ -24,14 +24,14 @@ Omit `--max-samples` for the full split; use `--language zh` for Chinese. A loca
 `--meta /path/to/meta.lst` also works. Each line is
 `sample_id|reference_text|audio_path|target_text`; paths are relative to the
 metadata file. Reference text is used for scoring. Identifiers must be unique.
-Preparation converts audio to mono 16 kHz PCM16 before either implementation
+Preparation converts audio to mono 16 kHz PCM16 before either service endpoint
 runs, and writes `meta.lst`, WAV files and a manifest with source revision,
 ordered sample identifiers, row count and unique source-path count. The latter
 is not a content-based deduplication count.
 
 ## Start the service
 
-Resolve the checkpoint once and use the same local snapshot for both runtimes:
+Resolve the checkpoint to a pinned local snapshot:
 
 ```bash
 MODEL_PATH=$(hf download nvidia/nemotron-3.5-asr-streaming-0.6b \
@@ -108,44 +108,13 @@ EOS-to-final includes processing of queued audio and is **not** latency after a
 person stops speaking. HTTP file transcription and native streaming use different
 inference paths; their throughput ratio is not an implementation speedup.
 
-## Independent Transformers transcripts
-
-Use a separate environment with `transformers==5.13.0`, NumPy and the same PyTorch
-version as the service. Do not upgrade the serving environment to run the reference.
-Stop the service before loading the reference on a capacity-constrained GPU.
-
-```bash
-/path/to/reference-env/bin/python -m benchmarks.eval.nemotron_reference \
-  --model-path "$MODEL_PATH" \
-  --meta benchmarks/results/nemotron-input/meta.lst \
-  --language auto --lookahead 3 --repeats 2 \
-  --output benchmarks/results/nemotron-reference.jsonl
-```
-
-The reference imports the official Transformers model, not Omni's vendored model.
-It runs offline and streaming inference at batch size 1, retains tokens and raw
-text, and pads the final streaming feature window. Compare repetitions within
-one implementation before comparing matching sample identifiers and modes across
-implementations. Compare normalized text with `benchmarks.tasks.asr.normalize_text`
-in the serving environment and retain raw mismatches. Do not compare HTTP output
-to the streaming reference. Its diagnostic timing is not a service benchmark.
-
-This small reproduction entry point does **not** reproduce the historical paired
-A/A and A/B performance experiments or batch-matched reference diagnostics.
-At concurrency 4, dynamically formed service batches can differ from reference
-batch size 1; a transcript mismatch alone does not identify a model integration
-bug. The original review also retained a few unresolved Pipecat mismatches and
-one failure among 12 longer burst requests at concurrency 4 (`outbound event
-budget exhausted`). That sample does not estimate a general long-audio failure
-rate. See the linked review for the complete historical results and limits.
-
 ## Validation results
 
 See [PR #2571](https://github.com/sgl-project/sglang-omni/pull/2571) for the
 small H100 execution check and [the #1748 review](https://github.com/sgl-project/sglang-omni/pull/1748#issuecomment-5861686350)
 for the larger historical evaluation. The H100 check used the initial dedicated
 HTTP wrapper and native client. Commands above now use shared HTTP and realtime
-benchmarks; the official reference script is unchanged. The realtime migration
+benchmarks. The realtime migration
 was checked with local protocol tests and offline replay of the recorded H100
 events, not a fresh GPU execution. Historical results retain their original
 source version.

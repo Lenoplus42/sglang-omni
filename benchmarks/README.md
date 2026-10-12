@@ -18,7 +18,7 @@ benchmarks/
 └── results/        # (gitignored) evaluation outputs
 ```
 
-Nemotron ASR service measurements and reference transcripts: [reproduction guide](eval/nemotron.md).
+Nemotron ASR service measurements: [reproduction guide](eval/nemotron.md).
 
 ## Quick Start
 
@@ -447,7 +447,7 @@ Summaries also report successful audio seconds per second, requests per second,
 request wall time, and request RTF. Failed sessions remain in per-sample records
 and traces but are excluded from latency summaries. Prepared mono 16 kHz PCM16
 WAV input is sent unchanged. See the [Nemotron guide](eval/nemotron.md) for a
-matching HTTP/streaming/reference setup.
+matching HTTP/streaming setup.
 
 ## Native duplex (VoiceChat) protocol benchmark
 
