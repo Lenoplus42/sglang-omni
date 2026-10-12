@@ -618,3 +618,21 @@ def test_benchmark_persists_observations_before_quality_scoring(
         assert saved.sample_id == row["sample_id"]
         assert replay_trace(saved)["verdict"] == "pass"
         assert (path.parent / f"input-{saved.input_pcm_sha256}.pcm").read_bytes() == pcm
+
+
+@pytest.mark.parametrize("text, expected", [("hello", 0.4), ("", None)])
+def test_transcription_first_text_starts_at_first_send(
+    text: str, expected: float | None
+) -> None:
+    trace = make_trace(
+        [
+            (0.2, seg(0, "", final=False, index=1)),
+            (0.4, seg(0, text, final=False, index=2)),
+            (0.6, seg(0, "final text", final=True, index=3)),
+        ]
+    )
+    first_text = latency_metrics(trace)["first_text_s"]
+    if expected is None:
+        assert first_text is None
+    else:
+        assert first_text == pytest.approx(expected)

@@ -73,8 +73,8 @@ def parse_args() -> argparse.Namespace:
         help="Limit samples (0 = the complete registered split).",
     )
     add_common_args(parser, default_output="")
+    parser.set_defaults(lang=ASR_LONGFORM_LANG)
     args = finalize_args(parser.parse_args())
-    args.lang = ASR_LONGFORM_LANG
     if not args.output:
         args.output = f"asr_{args.dataset.replace('-', '_')}_results.json"
     return args
@@ -140,11 +140,7 @@ def main() -> None:
             "repo_id": config.repo_id,
             "split": config.split,
             "lang": args.lang,
-            "request_language": (
-                args.request_language
-                if args.request_language is not None
-                else args.lang
-            ),
+            "request_language": args.request_language,
             "model_path": args.model_path,
             "declared_model_revision": args.model_revision,
             "dataset_revision": dataset_revision,

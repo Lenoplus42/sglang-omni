@@ -161,7 +161,7 @@ def _summary(
         else:
             pass
         for key in LATENCY_KEYS:
-            value = record.get(key)
+            value = record[key]
             if isinstance(value, list):
                 latencies[key].extend(value)
             elif value is not None:
@@ -205,14 +205,14 @@ async def _http_baseline(
     concurrency: int,
     model_path: str,
     lang: str,
-    request_language: str | None = None,
+    request_language: str,
 ) -> tuple[dict[str, Any], list[SampleOutput]]:
     outputs, wall_clock_s = await run_asr_transcription(
         samples,
         host=host,
         port=port,
         model_path=model_path,
-        lang=request_language if request_language is not None else lang,
+        lang=request_language,
         concurrency=concurrency,
     )
     results = build_asr_eval_results(

@@ -30,7 +30,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Literal
 
-import msgspec
 import websockets
 from pydantic import JsonValue
 from websockets.asyncio.client import ClientConnection
@@ -116,7 +115,8 @@ class SessionTrace:
         return self.end_s - self.first_send_s
 
 
-class TranscriptionProtocol(msgspec.Struct, frozen=True, kw_only=True):
+@dataclass(frozen=True, kw_only=True)
+class TranscriptionProtocol:
     language: str | None = None
     turn_detection: dict[str, JsonValue] | None = None
     query: ClassVar[str] = "?intent=transcription"

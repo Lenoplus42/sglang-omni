@@ -321,6 +321,14 @@ def latency_metrics(trace: SessionTrace) -> dict[str, Any]:
         done_to_completed = completed[-1].recv_s - trace.done_sent_s
 
     return {
+        "first_text_s": next(
+            (
+                record.recv_s - trace.first_send_s
+                for record in partials
+                if record.event.get("text") and trace.first_send_s is not None
+            ),
+            None,
+        ),
         "decode_interval_ms": decode_interval_ms,
         "segment_count": len(finals),
         "partial_count": len(partials),

@@ -224,7 +224,8 @@ async def run_asr_seedtts_once(
     warmup: int = 0,
     disable_tqdm: bool = True,
     stream: bool = False,
-    request_language: str | None = None,
+    *,
+    request_language: str,
 ) -> dict:
     """Run one SeedTTS ASR benchmark pass and return WER/speed/worker metrics."""
     before = _fetch_worker_snapshot(host, port)
@@ -233,7 +234,7 @@ async def run_asr_seedtts_once(
         host=host,
         port=port,
         model_path=model_path,
-        lang=request_language if request_language is not None else lang,
+        lang=request_language,
         concurrency=concurrency,
         warmup=warmup,
         disable_tqdm=disable_tqdm,
@@ -690,6 +691,10 @@ def add_common_args(
 
 def finalize_args(args: argparse.Namespace) -> argparse.Namespace:
     """Fill defaults that depend on other parsed arguments."""
+    if args.request_language is None:
+        args.request_language = args.lang
+    else:
+        pass
     if not args.profile_urls:
         args.profile_urls = f"http://{args.host}:{args.port}"
     return args
@@ -743,11 +748,7 @@ async def _sweep(args, samples, concurrencies: list[int]) -> list[dict]:
                 host=args.host,
                 port=args.port,
                 model_path=args.model_path,
-                lang=(
-                    args.request_language
-                    if args.request_language is not None
-                    else args.lang
-                ),
+                lang=args.request_language,
                 concurrency=concurrency,
                 stream=args.stream,
             )
@@ -848,11 +849,7 @@ def main() -> None:
             "port": args.port,
             "meta": args.meta,
             "lang": args.lang,
-            "request_language": (
-                args.request_language
-                if args.request_language is not None
-                else args.lang
-            ),
+            "request_language": args.request_language,
             "model_path": args.model_path,
             "declared_model_revision": model_revision,
             "dataset_revision": dataset_revision,
