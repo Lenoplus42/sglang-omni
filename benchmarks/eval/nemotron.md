@@ -61,24 +61,25 @@ python -m benchmarks.eval.benchmark_asr_seedtts \
   --save-raw-dir benchmarks/results/nemotron-http-raw \
   --output benchmarks/results/nemotron-http.json
 
-python -m benchmarks.eval.benchmark_nemotron_native \
+python -m benchmarks.eval.benchmark_asr_realtime \
   --meta benchmarks/results/nemotron-input/meta.lst \
-  --score-language en --max-samples 20 \
-  --concurrencies 1 4 --repeats 3 --warmup \
-  --packet-milliseconds 20 --timeout-seconds 300 \
-  --output benchmarks/results/nemotron-native-paced
+  --protocol native --port 8000 --lang en --max-samples 20 \
+  --model-path nvidia/nemotron-3.5-asr-streaming-0.6b \
+  --concurrencies 1,4 --repeats 3 --warmup \
+  --packet-ms 20 --timeout-s 300 \
+  --output benchmarks/results/nemotron-native-paced.json
 ```
 
 Set native `--max-samples` to the prepared row count for a full run. For Chinese,
-use HTTP `--lang zh` and native `--score-language zh`, retaining HTTP
+use HTTP `--lang zh` and native `--lang zh`, retaining HTTP
 `--request-language auto`. The shared HTTP benchmark defaults request language
 to `--lang`; the explicit override preserves the reviewed experiment.
 
-Native sends audio at recording speed by default. Add `--burst` and use a new
-output directory to send packets as quickly as possible. Each concurrency is
+Native sends audio at recording speed by default. Add `--no-pace` and use a new
+output path to send packets as quickly as possible. Each concurrency is
 the number of in-flight requests, not a guaranteed model batch size. Repeat 0
-is native warmup and is excluded from summaries; HTTP warmup is excluded by the
-shared runner. Use distinct output paths to avoid mixing experiments. HTTP writes
+is native warmup: traces are saved, but the run is excluded from measured results.
+HTTP warmup is excluded by the shared runner. Use distinct output paths to avoid mixing experiments. HTTP writes
 a sweep JSON with per-repeat summaries and measured per-sample JSONL under
 `--save-raw-dir`; native writes configuration, per-request text/errors, received
 wire events, packet timestamps and measured summaries. Inspect HTTP evaluation
@@ -87,13 +88,18 @@ requests failed. Native retains failures and exits nonzero when requests fail.
 
 | Metric | Meaning |
 |---|---|
-| WER / CER | Project-normalized corpus word error rate for English; character error rate for Chinese. Native `wer_percent` is a percentage for either scoring language. |
+| WER / CER | Project-normalized corpus word error rate for English; character error rate for Chinese. The shared `corpus_wer` is a fraction, not a percentage. |
 | Success / scored / skipped | Request completion is separate from scoring coverage. A transcript whose reference normalizes to empty can succeed but be skipped for scoring. |
 | Audio seconds per second (RTFx) | Successfully processed audio duration divided by the whole run's wall time, including connection setup and failed requests. |
 | Requests per second | Successful requests divided by the same run wall time. |
-| First text | First nonempty text delta received minus first packet send time; null when no nonempty delta arrives. |
-| EOS to final / drained | Time from sending end-of-input to final text / confirmation that input was processed. |
+| First text (`first_text_s`) | First nonempty text delta received minus first packet send time; null when no nonempty delta arrives. |
+| EOS to final / drained (`final_latency_s` / `done_to_completed_s`) | Time from sending end-of-input to final text / confirmation that input was processed. |
 | Request wall time / RTF | Native first-send-to-drained duration; divide by that request's audio duration for RTF. HTTP uses the shared runner's request timer. |
+
+Native traces are saved under `OUTPUT.traces` and can be replayed with
+`python -m benchmarks.realtime_asr.replay path/to/trace.json`.
+`first_partial_latency_s` is a separate metric measured from the audio packet
+matching the event's media timestamp; it is not the historical first-text metric.
 
 Native latency values are seconds; percentiles use nearest rank and include
 successful requests only. Every percentile includes its observation count.
@@ -138,5 +144,8 @@ rate. See the linked review for the complete historical results and limits.
 See [PR #2571](https://github.com/sgl-project/sglang-omni/pull/2571) for the
 small H100 execution check and [the #1748 review](https://github.com/sgl-project/sglang-omni/pull/1748#issuecomment-5861686350)
 for the larger historical evaluation. The H100 check used the initial dedicated
-HTTP wrapper; HTTP commands above now use the shared ASR benchmark with the same
-request language and scoring rules. The native and reference scripts are unchanged.
+HTTP wrapper and native client. Commands above now use shared HTTP and realtime
+benchmarks; the official reference script is unchanged. The realtime migration
+was checked with local protocol tests and offline replay of the recorded H100
+events, not a fresh GPU execution. Historical results retain their original
+source version.

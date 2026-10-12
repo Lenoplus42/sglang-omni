@@ -14,16 +14,26 @@ import pytest
 from aiohttp import web
 from websockets.asyncio.server import ServerConnection, serve
 
+from benchmarks.dataset.seedtts import SampleInput
+from benchmarks.eval.benchmark_asr_realtime import (
+    load_pcm16,
+    run_asr_realtime_once,
+    run_sweep,
+)
 from benchmarks.eval.benchmark_asr_seedtts import main as run_http
-from benchmarks.eval.benchmark_nemotron_native import run
-from benchmarks.eval.nemotron_native_client import measure
+from benchmarks.realtime_asr.client import run_session
+from benchmarks.realtime_asr.metrics import check_invariants, latency_metrics
+from benchmarks.realtime_asr.replay import load_trace, replay_trace
 
 
 @pytest.mark.parametrize(
-    "fault", ["none", "duplicate", "duration", "error", "empty-reference"]
+    "fault",
+    ["none", "duplicate", "duration", "identity", "delta", "error", "empty-reference"],
 )
 def test_wire_contract(
-    fault: Literal["none", "duplicate", "duration", "error", "empty-reference"],
+    fault: Literal[
+        "none", "duplicate", "duration", "identity", "delta", "error", "empty-reference"
+    ],
     tmp_path: Path,
 ) -> None:
     async def scenario() -> None:
@@ -39,6 +49,14 @@ def test_wire_contract(
                 event = json.loads(raw)
                 if event["type"] == "input_audio_buffer.append":
                     sequences.append(event["sglang"]["seq"])
+                    await socket.send(
+                        json.dumps(
+                            {
+                                "type": "sglang.input_audio.accepted",
+                                "seq": event["sglang"]["seq"],
+                            }
+                        )
+                    )
                     audio.extend(base64.b64decode(event["audio"]))
                     if event["sglang"]["seq"] == 0:
                         await socket.send(
@@ -61,14 +79,22 @@ def test_wire_contract(
                     else:
                         final = {
                             "type": "response.output_text.done",
-                            "response_id": "r1",
-                            "text": "hello",
+                            "response_id": "wrong" if fault == "identity" else "r1",
+                            "text": "wrong" if fault == "delta" else "hello",
                         }
                         await socket.send(json.dumps(final))
                     if fault == "duplicate":
                         await socket.send(json.dumps(final))
                     else:
                         pass
+                    await socket.send(
+                        json.dumps(
+                            {
+                                "type": "response.done",
+                                "response": {"status": "completed"},
+                            }
+                        )
+                    )
                     await socket.send(
                         json.dumps(
                             {
@@ -87,21 +113,24 @@ def test_wire_contract(
 
         async with serve(server, "127.0.0.1", 0) as listener:
             port = listener.sockets[0].getsockname()[1]
-            result = await measure(
-                f"ws://127.0.0.1:{port}", b"\0\0" * 1000, "test", "hello", paced=True
+            trace = await run_session(
+                f"ws://127.0.0.1:{port}",
+                b"\0\0" * 1000,
+                protocol="native",
+                packet_ms=20,
+                paced=True,
             )
         assert sequences == [0, 1, 2, 3]
         if fault in {"none", "empty-reference"}:
-            assert result.error is None
-            assert result.text == "hello"
-            assert (
-                result.eos_to_final_seconds is not None
-                and result.eos_to_final_seconds >= 0
-            )
-            assert result.wall_seconds >= result.audio_seconds
-            assert json.loads(result.events[-1]["raw_json"])["type"] == "session.closed"
+            assert check_invariants(trace) == []
+            assert trace.completed_text == "hello"
+            metrics = latency_metrics(trace)
+            assert metrics["final_latency_s"][0] >= 0
+            assert metrics["first_text_s"] is not None
+            assert trace.done_sent_s - trace.first_send_s >= trace.audio_duration_s
+            assert trace.received[-1].type == "session.closed"
         else:
-            assert result.error is not None
+            assert check_invariants(trace)
         sequences.clear()
         with wave.open(str(tmp_path / "audio.wav"), "wb") as audio:
             audio.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
@@ -112,40 +141,37 @@ def test_wire_contract(
         output = tmp_path / "results"
         async with serve(server, "127.0.0.1", 0) as listener:
             port = listener.sockets[0].getsockname()[1]
-            arguments = argparse.Namespace(
-                meta=str(meta),
-                dataset_revision=None,
-                max_samples=1,
-                score_language="en",
-                output=output,
-                url=f"ws://127.0.0.1:{port}",
-                model="fake",
-                concurrencies=[1, 4],
-                repeats=1,
-                warmup=fault == "empty-reference",
-                packet_milliseconds=20,
-                burst=True,
-                timeout_seconds=1,
+            result = await run_asr_realtime_once(
+                [
+                    SampleInput(
+                        "sample", reference, str(tmp_path / "audio.wav"), reference
+                    )
+                ],
+                host="127.0.0.1",
+                port=port,
+                protocol="native",
+                packet_ms=20,
+                paced=False,
+                timeout_s=1,
+                trace_dir=str(output),
             )
-            if fault in {"none", "empty-reference"}:
-                await run(arguments)
-            else:
-                with pytest.raises(RuntimeError, match="measured requests failed"):
-                    await run(arguments)
-        summary = json.loads((output / "summary.json").read_text())[0]
-        raw = json.loads((output / "c1-r1.jsonl").read_text())
+        summary = result["summary"]
+        record = result["per_sample"][0]
+        saved = load_trace(Path(record["trace_file"]))
+        assert saved.trace.protocol == "native"
+        assert replay_trace(saved)["metrics"] == latency_metrics(saved.trace)
         if fault == "none":
-            assert summary["success"] == 1 and summary["wer_percent"] == 0
-            assert raw["score"]["hyp_norm"] == "hello"
+            assert summary["success"] == summary["evaluated"] == 1
+            assert summary["corpus_wer"] == 0
+            assert replay_trace(saved)["verdict"] == "pass"
         elif fault == "empty-reference":
-            assert summary["success"] == 1
-            assert summary["wer_evaluated"] == 0 and summary["wer_skipped"] == 1
-            assert summary["wer_percent"] is None
-            assert raw["error"] is None
-            assert raw["score"]["error"] == "Empty reference after normalization"
+            assert summary["success"] == 1 and summary["evaluated"] == 0
+            assert summary["corpus_wer"] is None
+            assert record["wer_error"] == "Empty reference after normalization"
         else:
-            assert summary["success"] == 0 and summary["wer_percent"] is None
-            assert raw["error"] and not raw["score"]["is_success"]
+            assert summary["success"] == 0 and summary["corpus_wer"] is None
+            assert summary["first_text_s"] is None
+            assert replay_trace(saved)["verdict"] == "fail"
 
     asyncio.run(scenario())
 
@@ -158,11 +184,11 @@ def test_timeout_retains_received_events() -> None:
 
         async with serve(server, "127.0.0.1", 0) as listener:
             port = listener.sockets[0].getsockname()[1]
-            result = await measure(
-                f"ws://127.0.0.1:{port}", b"", "timeout", "", timeout_seconds=0.05
+            result = await run_session(
+                f"ws://127.0.0.1:{port}", b"", protocol="native", timeout_s=0.05
             )
-        assert result.error.startswith("TimeoutError")
-        assert json.loads(result.events[0]["raw_json"])["type"] == "session.created"
+        assert result.error.startswith("timeout")
+        assert result.received[0].type == "session.created"
 
     asyncio.run(scenario())
 
@@ -244,3 +270,108 @@ def test_http_separates_request_language_and_scoring(
         assert result["total"] == result["evaluated"] == 1
         assert result["corpus_wer"]["mean"] == 0
     assert len(list((tmp_path / "raw").glob("*.jsonl"))) == 2
+
+
+@pytest.mark.parametrize("fail_warmup", [False, True])
+def test_native_sweep_preserves_pcm_and_excludes_warmup(
+    tmp_path: Path, fail_warmup: bool
+) -> None:
+    pcm = b"\x00\x80\xff\x7f" * 160
+    audio_path = tmp_path / "audio.wav"
+    with wave.open(str(audio_path), "wb") as audio:
+        audio.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
+        audio.writeframes(pcm)
+    assert load_pcm16(str(audio_path)) == pcm
+    captured_audio: list[bytes] = []
+
+    async def server(connection: ServerConnection) -> None:
+        await connection.send(json.dumps({"type": "session.created", "session": {}}))
+        await connection.recv()
+        await connection.send(json.dumps({"type": "session.updated", "session": {}}))
+        audio_bytes = bytearray()
+        async for raw in connection:
+            event = json.loads(raw)
+            if event["type"] == "input_audio_buffer.append":
+                audio_bytes.extend(base64.b64decode(event["audio"]))
+                await connection.send(
+                    json.dumps(
+                        {
+                            "type": "sglang.input_audio.accepted",
+                            "seq": event["sglang"]["seq"],
+                        }
+                    )
+                )
+            elif event["type"] == "sglang.input_audio.end":
+                captured_audio.append(bytes(audio_bytes))
+                if fail_warmup:
+                    await connection.send(
+                        json.dumps({"type": "error", "error": "injected"})
+                    )
+                    return
+                else:
+                    pass
+                for response in (
+                    {
+                        "type": "response.output_text.delta",
+                        "response_id": "r",
+                        "delta": "hello",
+                    },
+                    {
+                        "type": "response.output_text.done",
+                        "response_id": "r",
+                        "text": "hello",
+                    },
+                    {"type": "response.done", "response": {"status": "completed"}},
+                    {
+                        "type": "sglang.input_audio.drained",
+                        "consumed_ms": len(audio_bytes) / 32,
+                    },
+                ):
+                    await connection.send(json.dumps(response))
+            else:
+                assert event["type"] == "session.close"
+                await connection.send(json.dumps({"type": "session.closed"}))
+                return
+
+    async def scenario() -> None:
+        async with serve(server, "127.0.0.1", 0) as listener:
+            arguments = argparse.Namespace(
+                host="127.0.0.1",
+                port=listener.sockets[0].getsockname()[1],
+                protocol="native",
+                mode=None,
+                lang="en",
+                model_path="test",
+                packet_ms=20,
+                no_pace=True,
+                trailing_silence_ms=1000,
+                timeout_s=2,
+                http_baseline=False,
+                concurrencies=[1, 4],
+                repeats=2,
+                warmup=True,
+                output=str(tmp_path / "results.json"),
+                trace_dir=str(tmp_path / "traces"),
+            )
+            samples = [SampleInput("sample", "hello", str(audio_path), "")]
+            if fail_warmup:
+                with pytest.raises(RuntimeError, match="Warmup failed"):
+                    await run_sweep(arguments, samples)
+                saved = load_trace(next((tmp_path / "traces").glob("*/000000.json")))
+                assert replay_trace(saved)["verdict"] == "fail"
+                assert len(captured_audio) == 1
+                return
+            else:
+                results = await run_sweep(arguments, samples)
+        assert len(results) == 4
+        assert [result["config"]["repeat"] for result in results] == [1, 2, 1, 2]
+        assert all(not result["config"]["warmup"] for result in results)
+        assert all(result["summary"]["success"] == 1 for result in results)
+        assert captured_audio == [pcm] * 6
+        manifests = [
+            json.loads(path.read_text())
+            for path in (tmp_path / "traces").glob("*/manifest.json")
+        ]
+        assert sum(manifest["config"]["warmup"] for manifest in manifests) == 2
+
+    asyncio.run(scenario())
