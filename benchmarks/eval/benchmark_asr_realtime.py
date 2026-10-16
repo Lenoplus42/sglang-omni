@@ -154,12 +154,9 @@ def _summary(
     lang: str,
     wall_clock_s: float,
 ) -> dict[str, Any]:
+    clean = [record for record in per_sample if not record["violations"]]
     latencies: dict[str, list[float]] = {key: [] for key in LATENCY_KEYS}
-    for record in per_sample:
-        if record["violations"]:
-            continue
-        else:
-            pass
+    for record in clean:
         for key in LATENCY_KEYS:
             value = record[key]
             if isinstance(value, list):
@@ -167,7 +164,6 @@ def _summary(
             elif value is not None:
                 latencies[key].append(value)
     wer = calculate_wer_metrics(outputs, lang)
-    clean = [record for record in per_sample if not record["violations"]]
     return {
         "success": len(clean),
         "requests_per_second": len(clean) / wall_clock_s,

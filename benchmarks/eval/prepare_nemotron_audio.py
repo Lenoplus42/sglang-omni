@@ -1,4 +1,4 @@
-"""Prepare shared PCM16 inputs for Nemotron service and reference evaluation."""
+"""Prepare shared PCM16 inputs for HTTP and native ASR benchmarks."""
 
 import argparse
 import json
