@@ -10,8 +10,10 @@ import wave
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
+from unittest.mock import patch
 
 import pytest
+import torch
 from aiohttp import web
 from websockets.asyncio.server import ServerConnection, serve
 
@@ -310,7 +312,12 @@ def test_native_sweep_preserves_pcm_and_excludes_warmup(
     with wave.open(str(audio_path), "wb") as audio:
         audio.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
         audio.writeframes(pcm)
-    assert load_pcm16(str(audio_path)) == pcm
+    assert load_pcm16(str(audio_path), preserve_pcm=True) == pcm
+    with patch(
+        "benchmarks.eval.benchmark_asr_realtime._load_wav_mono_16k",
+        return_value=torch.tensor([-1.0, 32767 / 32768] * 160),
+    ):
+        assert load_pcm16(str(audio_path)) == b"\x01\x80\xfe\x7f" * 160
     server = NativeTestServer(fault="error" if fail_warmup else "none")
 
     async def scenario() -> None:

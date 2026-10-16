@@ -105,19 +105,22 @@ LATENCY_KEYS = (
 )
 
 
-def load_pcm16(wav_path: str) -> bytes:
+def load_pcm16(wav_path: str, *, preserve_pcm: bool = False) -> bytes:
     """Mono 16 kHz PCM16 bytes for any WAV the SeedTTS loader hands out."""
-    try:
-        with wave.open(wav_path, "rb") as audio_file:
-            if (
-                audio_file.getnchannels(),
-                audio_file.getsampwidth(),
-                audio_file.getframerate(),
-            ) == (1, 2, 16000):
-                return audio_file.readframes(audio_file.getnframes())
-            else:
-                pass
-    except wave.Error:
+    if preserve_pcm:
+        try:
+            with wave.open(wav_path, "rb") as audio_file:
+                if (
+                    audio_file.getnchannels(),
+                    audio_file.getsampwidth(),
+                    audio_file.getframerate(),
+                ) == (1, 2, 16000):
+                    return audio_file.readframes(audio_file.getnframes())
+                else:
+                    pass
+        except wave.Error:
+            pass
+    else:
         pass
     audio = _load_wav_mono_16k(wav_path)
     return (audio.clamp(-1.0, 1.0) * 32767.0).to(torch.int16).numpy().tobytes()
@@ -153,10 +156,11 @@ def _summary(
     *,
     lang: str,
     wall_clock_s: float,
+    protocol: Literal["transcription", "native"] = "transcription",
 ) -> dict[str, Any]:
     clean = [record for record in per_sample if not record["violations"]]
     latencies: dict[str, list[float]] = {key: [] for key in LATENCY_KEYS}
-    for record in clean:
+    for record in clean if protocol == "native" else per_sample:
         for key in LATENCY_KEYS:
             value = record[key]
             if isinstance(value, list):
@@ -183,7 +187,9 @@ def _summary(
         "evaluated": wer["evaluated"],
         "sessions_with_violations": len(per_sample) - len(clean),
         "sessions_with_client_error": sum(1 for r in per_sample if r["error"]),
-        "corpus_wer": wer["wer_corpus"] if wer["evaluated"] else None,
+        "corpus_wer": (
+            None if protocol == "native" and not wer["evaluated"] else wer["wer_corpus"]
+        ),
         "per_sample_wer_max": wer["wer_per_sample_max"],
         "segments_total": sum(r["segment_count"] for r in per_sample),
         "partials_total": sum(r["partial_count"] for r in per_sample),
@@ -277,7 +283,9 @@ async def run_asr_realtime_once(
     pcm_cache = {} if pcm_cache is None else pcm_cache
     for sample in samples:
         if sample.ref_audio not in pcm_cache:
-            pcm_cache[sample.ref_audio] = load_pcm16(sample.ref_audio)
+            pcm_cache[sample.ref_audio] = load_pcm16(
+                sample.ref_audio, preserve_pcm=protocol == "native"
+            )
 
     config = {
         "repeat": repeat,
@@ -390,7 +398,9 @@ async def run_asr_realtime_once(
             ),
             "native_unit_ms": native_units.pop() if len(native_units) == 1 else None,
         },
-        "summary": _summary(per_sample, outputs, lang=lang, wall_clock_s=wall_clock_s),
+        "summary": _summary(
+            per_sample, outputs, lang=lang, wall_clock_s=wall_clock_s, protocol=protocol
+        ),
         "per_sample": per_sample,
     }
     if with_http_baseline:
@@ -428,18 +438,17 @@ def _fmt_stat(stat: dict[str, Any] | None) -> str:
 def _print_table(results: list[dict[str, Any]]) -> None:
     print()
     print(
-        "| conc | repeat | protocol | mode | interval ms | sessions | violations | corpus WER | HTTP WER "
+        "| conc | mode | interval ms | sessions | violations | corpus WER | HTTP WER "
         "| ΔWER vs HTTP (common n) "
         "| first partial mean/p50/p95 s | partial gap mean/p50/p95 s "
         "| final mean/p50/p95 s | done→completed mean/p50/p95 s | wall s |"
     )
-    print("|" + "---|" * 15)
+    print("|" + "---|" * 13)
     for result in results:
         config, summary = result["config"], result["summary"]
-        interval_ms = config["decode_interval_ms"] or config["native_unit_ms"]
         print(
-            f"| {config['concurrency']} | {config['repeat']} | {config['protocol']} | {config['mode'] or 'n/a'} "
-            f"| {interval_ms} | {summary['total']} "
+            f"| {config['concurrency']} | {config['mode']} "
+            f"| {config['decode_interval_ms'] if config['protocol'] == 'transcription' else config['native_unit_ms']} | {summary['total']} "
             f"| {summary['sessions_with_violations']} "
             f"| {_fmt(summary['corpus_wer'], 4)} "
             f"| {_fmt(summary.get('http_corpus_wer'), 4)} "
@@ -542,6 +551,13 @@ async def run_sweep(
                 else:
                     pass
             else:
+                summary = result["summary"]
+                print(
+                    f"[conc={concurrency}] wall={summary['wall_clock_s']:.1f}s "
+                    f"violations={summary['sessions_with_violations']}/{summary['total']} "
+                    f"corpus_wer={_fmt(summary['corpus_wer'], 4)} "
+                    f"first_partial_p95={_fmt((summary['first_partial_latency_s'] or {}).get('p95'))}s"
+                )
                 results.append(result)
     return results
 

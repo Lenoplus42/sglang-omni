@@ -72,7 +72,9 @@ class SessionTrace:
     """Everything one session did, with timestamps, and nothing derived."""
 
     url: str
-    protocol: Literal["transcription", "native"] = "transcription"
+    protocol: Literal["transcription", "native"] = field(
+        default="transcription", kw_only=True
+    )
     session: dict[str, Any] = field(default_factory=dict)
     """The session payload from session.created/session.updated."""
     sent: list[SentPacket] = field(default_factory=list)
