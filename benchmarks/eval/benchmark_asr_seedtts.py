@@ -225,9 +225,13 @@ async def run_asr_seedtts_once(
     disable_tqdm: bool = True,
     stream: bool = False,
     *,
-    request_language: str,
+    request_language: str | None = None,
 ) -> dict:
     """Run one SeedTTS ASR benchmark pass and return WER/speed/worker metrics."""
+    if request_language is None:
+        request_language = lang
+    else:
+        pass
     before = _fetch_worker_snapshot(host, port)
     outputs, wall_clock_s = await run_asr_transcription(
         samples,

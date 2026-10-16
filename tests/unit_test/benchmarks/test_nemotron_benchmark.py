@@ -22,6 +22,7 @@ from benchmarks.eval.benchmark_asr_realtime import (
     run_sweep,
 )
 from benchmarks.eval.benchmark_asr_seedtts import main as run_http
+from benchmarks.eval.benchmark_asr_seedtts import run_asr_seedtts_once
 from benchmarks.realtime_asr.client import run_session
 from benchmarks.realtime_asr.metrics import check_invariants, latency_metrics
 from benchmarks.realtime_asr.replay import load_trace, replay_trace
@@ -265,10 +266,29 @@ def test_http_separates_request_language_and_scoring(
                 else:
                     pass
                 await asyncio.to_thread(run_http)
+                if request_language is None:
+                    legacy_result = await asyncio.to_thread(
+                        asyncio.run,
+                        run_asr_seedtts_once(
+                            [
+                                SampleInput(
+                                    "sample", "hello", str(tmp_path / "audio.wav"), ""
+                                )
+                            ],
+                            host="127.0.0.1",
+                            port=port,
+                            concurrency=1,
+                            model_path="test",
+                            lang="en",
+                        ),
+                    )
+                    assert legacy_result["summary"]["evaluated"] == 1
+                else:
+                    pass
                 await site.stop()
         finally:
             await runner.cleanup()
-        assert languages == [expected_language] * 4
+        assert languages == [expected_language] * (5 if request_language is None else 4)
 
     asyncio.run(scenario())
     results = json.loads(output.read_text())
