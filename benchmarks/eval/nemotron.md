@@ -1,17 +1,12 @@
-# Nemotron ASR reproduction
+# Nemotron ASR benchmark
 
-These optional entry points reproduce the **measurement method** used to review
-[#1748](https://github.com/sgl-project/sglang-omni/pull/1748#issuecomment-5861686350).
-They do not register CI jobs or change model inference. Run commands from the
-repository root after installing the project and its benchmark dependencies.
-The native client also needs `websockets>=14`. Outputs and audio belong outside
-source control, for example under `benchmarks/results/`.
+A unified measurement method for Nemotron 3.5 ASR over HTTP and native streaming.
+Run the commands from the repository root with the project and benchmark
+dependencies installed. Native streaming requires `websockets>=14`.
 
-## Prepare identical inputs
+## Prepare audio
 
-SeedTTS supplies recordings and reference transcripts here; no TTS is generated.
-The loader preserves dataset rows, including repeated recordings with distinct
-sample identifiers. Do not describe the row count as the number of unique clips.
+Convert SeedTTS recordings to mono 16 kHz PCM16 for both endpoints:
 
 ```bash
 python -m benchmarks.eval.prepare_nemotron_audio \
@@ -20,18 +15,12 @@ python -m benchmarks.eval.prepare_nemotron_audio \
   --output benchmarks/results/nemotron-input
 ```
 
-Omit `--max-samples` for the full split; use `--language zh` for Chinese. A local
-`--meta /path/to/meta.lst` also works. Each line is
-`sample_id|reference_text|audio_path|target_text`; paths are relative to the
-metadata file. Reference text is used for scoring. Identifiers must be unique.
-Preparation converts audio to mono 16 kHz PCM16 before either service endpoint
-runs, and writes `meta.lst`, WAV files and a manifest with source revision,
-ordered sample identifiers, row count and unique source-path count. The latter
-is not a content-based deduplication count.
+Omit `--max-samples` for the full split. Use `--language zh` for Chinese.
+For local audio, pass `--meta /path/to/meta.lst`. Each line has the format
+`sample_id|reference_text|audio_path|target_text`, with unique sample IDs and
+audio paths relative to the metadata file.
 
 ## Start the service
-
-Resolve the checkpoint to a pinned local snapshot:
 
 ```bash
 MODEL_PATH=$(hf download nvidia/nemotron-3.5-asr-streaming-0.6b \
@@ -44,11 +33,6 @@ sgl-omni serve --model-path "$MODEL_PATH" \
   --asr.factory.max_batch_size 8 --asr.factory.max_batch_wait_ms 2 \
   --asr.factory.session_max_concurrency 8
 ```
-
-Record `git rev-parse HEAD`, `python -m pip freeze`, the server command and
-`nvidia-smi` alongside results. The original run used one H100 80 GB, Python
-3.12.3, PyTorch 2.13.0+cu130 and Transformers 5.12.1 in the serving environment.
-Those historical numbers are not results for a newer checkout or a different GPU.
 
 ## Measure HTTP and native streaming
 
@@ -70,51 +54,42 @@ python -m benchmarks.eval.benchmark_asr_realtime \
   --output benchmarks/results/nemotron-native-paced.json
 ```
 
-Set native `--max-samples` to the prepared row count for a full run. For Chinese,
-use HTTP `--lang zh` and native `--lang zh`, retaining HTTP
-`--request-language auto`. The shared HTTP benchmark defaults request language
-to `--lang`; the explicit override preserves the reviewed experiment.
+Set native `--max-samples` to the prepared sample count. For Chinese, set
+`--lang zh` in both commands. HTTP `--request-language auto` enables automatic
+language detection while `--lang` selects the language used for scoring.
 
-Native sends audio at recording speed by default. Add `--no-pace` and use a new
-output path to send packets as quickly as possible. Each concurrency is
-the number of in-flight requests, not a guaranteed model batch size. Repeat 0
-is native warmup: traces are saved, but the run is excluded from measured results.
-HTTP warmup is excluded by the shared runner. Use distinct output paths to avoid mixing experiments. HTTP writes
-a sweep JSON with per-repeat summaries and measured per-sample JSONL under
-`--save-raw-dir`; native writes configuration, per-request text/errors, received
-wire events, packet timestamps and measured summaries. Inspect HTTP evaluation
-coverage and per-sample errors; the shared HTTP CLI does not fail solely because
-requests failed. Native retains failures and exits nonzero when requests fail.
+The example uses 20 ms audio packets. The shared realtime CLI defaults to
+200 ms. Keep packet size and pacing consistent when comparing runs.
+Native streaming sends audio at recording speed by default. Add `--no-pace`
+to measure throughput with audio sent as quickly as possible.
+
+`--concurrencies` controls simultaneous requests. `--repeats` sets the measured
+runs per concurrency. `--warmup` adds an unmeasured run before those repeats.
+
+## Results
+
+HTTP saves aggregate results to `--output` and per-sample results to
+`--save-raw-dir`. Native streaming saves results to `--output` and audio,
+received events and timestamps to `OUTPUT.traces`. Replay a saved trace with:
+
+```bash
+python -m benchmarks.realtime_asr.replay path/to/trace.json
+```
 
 | Metric | Meaning |
 |---|---|
-| WER / CER | Project-normalized corpus word error rate for English; character error rate for Chinese. The shared `corpus_wer` is a fraction, not a percentage. |
-| Success / scored / skipped | Request completion is separate from scoring coverage. A transcript whose reference normalizes to empty can succeed but be skipped for scoring. |
-| Audio seconds per second (RTFx) | Successfully processed audio duration divided by the whole run's wall time, including connection setup and failed requests. |
-| Requests per second | Successful requests divided by the same run wall time. |
-| First text (`first_text_s`) | First nonempty text delta received minus first packet send time; null when no nonempty delta arrives. |
-| EOS to final / drained (`final_latency_s` / `done_to_completed_s`) | Time from sending end-of-input to final text / confirmation that input was processed. |
-| Request wall time / RTF | Native first-send-to-drained duration; divide by that request's audio duration for RTF. HTTP uses the shared runner's request timer. |
+| WER / CER | Word error rate for English or character error rate for Chinese. `corpus_wer` is a fraction. |
+| Success / evaluated | Completed requests and requests with a usable reference for scoring. |
+| Audio seconds per second (RTFx) | Successfully processed audio duration divided by total run time. |
+| Requests per second | Successful requests divided by total run time. |
+| First text (`first_text_s`) | Seconds from the first audio packet to the first nonempty partial text. Null if no partial text arrives. |
+| EOS to final / drained (`final_latency_s` / `done_to_completed_s`) | Seconds from end-of-input to final text or confirmation that all input was processed. |
+| Request wall time / RTF | Native request duration from first audio send to input drained, and that duration divided by audio duration. |
 
-Native traces are saved under `OUTPUT.traces` and can be replayed with
-`python -m benchmarks.realtime_asr.replay path/to/trace.json`.
-`first_partial_latency_s` is a separate metric measured from the audio packet
-matching the event's media timestamp; it is not the historical first-text metric.
+Latency summaries include successful requests only. Failed requests remain in
+the saved results. Check per-sample errors and scoring coverage in HTTP results,
+as the HTTP command can exit successfully even when requests fail.
 
-Native latency values are seconds; percentiles use nearest rank and include
-successful requests only. Every percentile includes its observation count.
-Report each repeat separately, especially with small cohorts. Under burst input,
-EOS-to-final includes processing of queued audio and is **not** latency after a
-person stops speaking. HTTP file transcription and native streaming use different
-inference paths; their throughput ratio is not an implementation speedup.
-
-## Validation results
-
-See [PR #2571](https://github.com/sgl-project/sglang-omni/pull/2571) for the
-small H100 execution check and [the #1748 review](https://github.com/sgl-project/sglang-omni/pull/1748#issuecomment-5861686350)
-for the larger historical evaluation. The H100 check used the initial dedicated
-HTTP wrapper and native client. Commands above now use shared HTTP and realtime
-benchmarks. The realtime migration
-was checked with local protocol tests and offline replay of the recorded H100
-events, not a fresh GPU execution. Historical results retain their original
-source version.
+With `--no-pace`, EOS-to-final includes queued audio processing time.
+HTTP file transcription and native streaming use different inference paths,
+so compare results within the same mode and configuration.

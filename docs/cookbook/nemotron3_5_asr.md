@@ -198,4 +198,4 @@ complete uploaded file. It does not select native PCM input.
 ## Reproduce evaluation
 
 See the [benchmark reproduction guide](../../benchmarks/eval/nemotron.md) for
-HTTP and native streaming measurements and independent Transformers transcripts.
+HTTP and native streaming measurements.
