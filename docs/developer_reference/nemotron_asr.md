@@ -31,3 +31,14 @@ validated and counted toward duration without further inference or buffering.
 Budget errors after stage acceptance terminate the stream. They are not a
 promise that retrying the same seq is safe. Public admission rejection follows
 the shared runtime's sequence/retry contract.
+
+## Persistent encoder state pool
+
+Streaming preallocates a bounded pool for attention and convolution history.
+Each session leases one slot, and batches address state by slot ID, preserving
+stable device storage across audio windows.
+
+Capacity is limited by `max_open_sessions` and `max_state_bytes`. A budget too
+small for one slot fails at startup. Completion, cancellation, failure and
+shutdown release slots, which are cleared before reuse. The pool is the sole
+streaming encoder state representation. Offline transcription is unchanged.
